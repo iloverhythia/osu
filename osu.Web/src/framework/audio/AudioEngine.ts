@@ -330,6 +330,10 @@ export class Track {
     return this._volume;
   }
 
+  get loop(): boolean {
+    return this._loop;
+  }
+
   set loop(v: boolean) {
     this._loop = v;
     this.element.loop = v;

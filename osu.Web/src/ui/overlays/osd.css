@@ -1,0 +1,104 @@
+/* OnScreenDisplay: box at (0.5, 0.75), corner radius 20, height 110 (99 contracted). */
+.osd-box {
+  position: fixed;
+  left: 50%;
+  top: 75%;
+  z-index: 2000;
+  height: 99px;
+  border-radius: 20px;
+  overflow: hidden;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  font-family: var(--font);
+  color: #fff;
+  transition:
+    opacity 500ms cubic-bezier(0.23, 1, 0.32, 1),
+    height 500ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.osd-box.shown {
+  opacity: 1;
+  height: 110px;
+}
+
+.osd-box.fading-out {
+  transition:
+    opacity 1500ms cubic-bezier(0.64, 0, 0.78, 0),
+    height 1500ms cubic-bezier(0.64, 0, 0.78, 0);
+}
+
+.osd-toast {
+  position: relative;
+  min-width: 240px;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 0 10px;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.osd-description {
+  padding: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.osd-value {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  padding: 0 10px;
+  transform: translateY(-50%);
+  text-align: center;
+  font-size: 24px;
+  font-weight: 300;
+  white-space: nowrap;
+}
+
+.osd-value.with-lights {
+  transform: translateY(-100%);
+}
+
+.osd-lights {
+  position: absolute;
+  left: 50%;
+  bottom: 40px;
+  display: flex;
+  gap: 5px;
+  margin-bottom: 5px;
+  transform: translateX(-50%);
+}
+
+.osd-light {
+  width: 25px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.4);
+  transition:
+    background 300ms,
+    box-shadow 300ms;
+}
+
+.osd-light.glowing {
+  background: #fff;
+  box-shadow: 0 0 10px rgba(32, 87, 179, 0.8);
+}
+
+.osd-extra {
+  position: absolute;
+  bottom: 15px;
+  left: 0;
+  right: 0;
+  padding: 0 10px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.3;
+  white-space: nowrap;
+}

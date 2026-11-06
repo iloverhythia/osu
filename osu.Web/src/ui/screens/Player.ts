@@ -99,6 +99,10 @@ export class PlayerScreen extends Screen {
   }
 
   /** GameplayScrollWheelHandling: the wheel adjusts volume unless MouseDisableWheel (always while paused). */
+  get allowTrackControl(): boolean {
+    return false;
+  }
+
   get scrollAdjustsVolume(): boolean {
     return this.paused || !this.gameplayStarted || !settings.get('input.mouseDisableWheel', false);
   }

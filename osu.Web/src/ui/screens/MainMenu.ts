@@ -132,7 +132,7 @@ export class MainMenuScreen extends Screen {
     this.content.className = 'menu-scale';
     this.content.append(this.buttons.el, this.additive, this.logoLayer, this.songTicker.el, bottom, this.footer, this.logo.el);
     // ButtonSystem.updateLogoState: the toolbar hides at the logo (Initial / Exit) and shows otherwise.
-    this.toolbar = createToolbar(game, { onHome: () => (this.buttons.state = ButtonSystemState.Initial) });
+    this.toolbar = createToolbar(game, { onHome: () => (this.buttons.state = ButtonSystemState.Initial), onGenerate: () => this.buttons.onEdit?.() });
     this.el.append(this.content, this.toolbar, this.flash, this.gate);
     this.logo.hide();
     this.buttons.alpha.set(0);
@@ -171,7 +171,7 @@ export class MainMenuScreen extends Screen {
     const t = clockNow();
     this.lastInput = t;
     this.game.setBackgroundDim(0.2);
-    if (!this.game.previewTrack?.isRunning) void this.game.startPreview();
+    if (!this.game.previewTrack?.isRunning && !this.game.music.userPaused) void this.game.startPreview();
     this.logo.alpha.clear().set(0).to(1, t, 100, Easing.OutQuint);
     this.logo.scale.finish();
     this.buttons.setOsuLogo(this.logo);
@@ -262,7 +262,7 @@ export class MainMenuScreen extends Screen {
     if (settings.get('ui.menuTips', true)) this.tips.showNextTip(t);
     this.footer.style.opacity = '';
     this.lastInput = t;
-    if (!this.game.previewTrack?.isRunning) void this.game.startPreview();
+    if (!this.game.previewTrack?.isRunning && !this.game.music.userPaused) void this.game.startPreview();
   }
 
   // ---------------------------------------------------------------- frame loop

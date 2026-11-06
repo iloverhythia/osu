@@ -32,7 +32,7 @@ import { FilterControl, HEIGHT_FROM_SCREEN_TOP } from '../select/FilterControl';
 import type { FilterBeatmap, FilterCriteria } from '../select/FilterCriteria';
 import { FooterButtonMods, FooterButtonOptions, FooterButtonRandom, OptionsEntry, ScreenFooter, FOOTER_HEIGHT } from '../select/Footer';
 import { rulesetIcon } from '../select/Icons';
-import { userButton } from '../overlays/Profile';
+import { createToolbar } from '../Toolbar';
 import { BeatmapDetailsArea, BeatmapTitleWedge, CORNER_RADIUS_HIDE_OFFSET, NoResultsPlaceholder, SongSelectHost } from '../select/Wedges';
 
 /** SongSelect.SELECTION_DEBOUNCE */
@@ -54,7 +54,7 @@ export class SongSelectScreen extends Screen {
   private readonly rightColumn: HTMLDivElement;
   private readonly rightGradient: HTMLDivElement;
   private readonly carouselContainer: HTMLDivElement;
-  private readonly toolbar: HTMLDivElement;
+  private readonly toolbar: HTMLElement;
   private readonly rulesetTabs: HTMLDivElement;
 
   private readonly model = new CarouselModelBuilder();
@@ -111,6 +111,10 @@ export class SongSelectScreen extends Screen {
   private readonly localRankWaiters = new Map<string, ((r: ScoreRank | null) => void)[]>();
 
   /** ScrollAdjustsVolume */
+  get trackLoops(): boolean {
+    return true;
+  }
+
   get scrollAdjustsVolume(): boolean {
     return true;
   }
@@ -207,17 +211,8 @@ export class SongSelectScreen extends Screen {
 
     // ---------------------------------------------------------------- layout
     this.rulesetTabs = h('div', { class: 'ss-ruleset-selector' });
-    this.toolbar = h(
-      'div',
-      { class: 'ss-toolbar' },
-      h('button', { class: 'ss-toolbar-button', title: 'Settings (Ctrl+O)', onclick: () => openSettings(this.game) }, '⚙'),
-      h('button', { class: 'ss-toolbar-button', onclick: () => this.game.openFilePicker() }, 'Import .osz'),
-      h('button', { class: 'ss-toolbar-button', title: 'Import a folder (for example an osu!stable Songs folder)', onclick: () => this.game.openFolderPicker() }, 'Import folder'),
-      h('button', { class: 'ss-toolbar-button ss-toolbar-generate', title: 'Generate a beatmap for any mode from a song (Ctrl+G)', onclick: () => this.openGenerator() }, '✦ Generate chart'),
-      h('div', { class: 'ss-toolbar-spacer' }),
-      this.rulesetTabs,
-      userButton(this.game),
-    );
+    // The global Toolbar (settings, home, rulesets, import, generator, now playing, user, clock, notifications).
+    this.toolbar = createToolbar(this.game, { onHome: () => this.game.popTo(sc => sc.el.classList.contains('main-menu')), onGenerate: () => this.openGenerator() });
 
     const wedges = h('div', { class: 'ss-wedges' }, this.titleWedge.el, h('div', { class: 'ss-wedge-gap' }), this.detailsArea.el);
     this.leftColumn = h('div', { class: 'ss-left', style: { top: `${-CORNER_RADIUS_HIDE_OFFSET}px`, left: `${-CORNER_RADIUS_HIDE_OFFSET}px` } }, wedges);
@@ -696,7 +691,7 @@ export class SongSelectScreen extends Screen {
     if (e.button !== 0 || e.pointerType === 'touch') return;
     const t = e.target as HTMLElement;
     // Only when the screen itself is the hovered target (not panels, wedges, filter control or the footer).
-    if (t.closest('.p, .title-wedge, .details-area, .filter-control, .screen-footer, .ss-toolbar, .no-results, .carousel-scrollbar, .ss-context-menu')) return;
+    if (t.closest('.p, .title-wedge, .details-area, .filter-control, .screen-footer, .tb-toolbar, .no-results, .carousel-scrollbar, .ss-context-menu')) return;
     if (this.revealTimer) return;
     const startX = e.clientX;
     const startY = e.clientY;

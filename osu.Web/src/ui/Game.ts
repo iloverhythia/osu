@@ -1,6 +1,10 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // The top-level game (OsuGame equivalent): screen stack, background, global audio, overlays and import handling.
 
+import { MusicController } from './MusicController';
+import { NotificationOverlay, type NotificationHandle } from './overlays/Notifications';
+import { NowPlayingOverlay } from './overlays/NowPlaying';
+import { trackSettings } from './overlays/OnScreenDisplay';
 import { VolumeOverlay } from './overlays/VolumeOverlay';
 import { SkinStore } from '../game/skinning/SkinStore';
 import { renderDemoBackground } from '../game/demo/Demo';
@@ -12,7 +16,7 @@ import type { Beatmap } from '../game/beatmaps/Beatmap';
 import { WorkingBeatmap } from '../game/beatmaps/WorkingBeatmap';
 import { BeatmapLibrary } from '../game/BeatmapLibrary';
 import { ModSet } from '../game/mods/Mods';
-import { getRuleset } from '../game/rulesets';
+import { availableRulesets, getRuleset } from '../game/rulesets';
 import type { Ruleset } from '../game/rulesets/Ruleset';
 import { Database, type BeatmapEntry, type BeatmapSetRecord } from '../game/storage/Database';
 import { importFiles } from '../game/storage/Importer';
@@ -33,6 +37,9 @@ export class Game {
   private readonly bgB: HTMLDivElement;
   private readonly bgParallax: HTMLDivElement;
   readonly volume: VolumeOverlay;
+  readonly music: MusicController;
+  readonly notifications: NotificationOverlay;
+  readonly nowPlaying: NowPlayingOverlay;
   private readonly menuCursor: MenuCursor;
   private muted = false;
   private parallax = { x: 0, y: 0, scale: 1, mouse: null as { x: number; y: number } | null };
@@ -111,6 +118,11 @@ export class Game {
     this.library.subscribe(() => this.scheduleStarBackfill());
     this.volume = new VolumeOverlay(this);
     root.appendChild(this.volume.el);
+    this.music = new MusicController(this);
+    this.notifications = new NotificationOverlay(root);
+    this.nowPlaying = new NowPlayingOverlay(this);
+    root.appendChild(this.nowPlaying.el);
+    trackSettings();
     this.menuCursor = new MenuCursor(this);
     root.appendChild(this.menuCursor.el);
     window.addEventListener('wheel', this.onWheel, { passive: false });
@@ -272,7 +284,8 @@ export class Game {
     if (this.previewTrack !== track) return;
     const preview = working.entry.previewTime;
     track.currentTime = fromStart ? 0 : preview > 0 ? preview : track.length * 0.4;
-    track.loop = true;
+    // Song select loops the preview; elsewhere the track plays out and the music controller moves on.
+    track.loop = this.currentScreen?.trackLoops ?? true;
     track.volume = 0;
     await track.start();
     // Fade in.
@@ -438,6 +451,8 @@ export class Game {
 
   private showScreen(s: Screen): void {
     this.refreshBackground(s);
+    if (this.previewTrack) this.previewTrack.loop = s.trackLoops;
+    if (!s.allowTrackControl) this.nowPlaying?.hide();
     s.el.classList.remove('leaving');
     if (!s.el.isConnected) this.screenLayer.appendChild(s.el);
     s.el.style.display = '';
@@ -487,14 +502,14 @@ export class Game {
     return this.overlays.length > 0;
   }
 
-  toast(message: string, kind: 'info' | 'error' | 'success' = 'info', duration = 3500): void {
-    const el = h('div', { class: `toast ${kind}` }, message);
-    this.toastLayer.appendChild(el);
-    setTimeout(() => {
-      el.style.transition = 'opacity 0.3s';
-      el.style.opacity = '0';
-      setTimeout(() => el.remove(), 300);
-    }, duration);
+  /** NotificationOverlay.Post (SimpleNotification / SimpleErrorNotification). */
+  toast(message: string, kind: 'info' | 'error' | 'success' = 'info', duration = 3500, onClick?: () => void): void {
+    this.notifications.post(message, kind, { important: duration > 5000, onClick });
+  }
+
+  /** ProgressNotification */
+  progressNotification(text: string): NotificationHandle {
+    return this.notifications.post(text, 'progress');
   }
 
   private handleKeyDown(e: KeyboardEvent): void {
@@ -519,6 +534,46 @@ export class Game {
       this.volume.toggleMute();
       return;
     }
+    // GlobalAction.ToggleNowPlaying (F6), ToggleNotifications (Ctrl+N), ToggleFPSDisplay (Ctrl+Shift+F).
+    if (e.code === 'F6' && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.repeat && this.currentScreen?.allowTrackControl !== false) {
+      e.preventDefault();
+      this.notifications.hide();
+      this.nowPlaying.toggle();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.code === 'KeyN' && !e.repeat) {
+      e.preventDefault();
+      this.nowPlaying.hide();
+      this.notifications.toggle();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'KeyF' && !e.repeat) {
+      e.preventDefault();
+      settings.set('graphics.showFps', !settings.get('graphics.showFps', false));
+      return;
+    }
+    // ToolbarRulesetSelector: Ctrl+1..4 select a ruleset (outside gameplay).
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && /^Digit[1-9]$/.test(e.code) && this.currentScreen?.allowTrackControl !== false) {
+      const r = availableRulesets()[Number(e.code.slice(5)) - 1];
+      if (r) {
+        e.preventDefault();
+        this.setRuleset(r);
+        return;
+      }
+    }
+    // GlobalAction.Home (Alt+Home)
+    if (e.altKey && e.code === 'Home' && this.currentScreen?.allowTrackControl !== false) {
+      e.preventDefault();
+      this.popTo(sc => sc.el.classList.contains('main-menu'));
+      return;
+    }
+    // The floating overlays close on Back before anything else.
+    if (e.code === 'Escape' && (this.nowPlaying.isOpen || this.notifications.isOpen)) {
+      e.preventDefault();
+      this.nowPlaying.hide();
+      this.notifications.hide();
+      return;
+    }
     const top = this.overlays[this.overlays.length - 1];
     if (top?.onKey && top.onKey(e)) {
       e.preventDefault();
@@ -535,6 +590,8 @@ export class Game {
     // Navigation, function keys (F1 mods, F2 random…) and the Ctrl+O / Ctrl+G shortcuts still work while the search box has focus.
     if (typing && e.code !== 'Enter' && e.code !== 'ArrowUp' && e.code !== 'ArrowDown' && !/^F\d+$/.test(e.code) && !((e.ctrlKey || e.metaKey) && /^Key[GO]$/.test(e.code))) return;
     if (this.currentScreen?.onKeyDown(e)) e.preventDefault();
+    // MusicKeyBindingHandler: music keys the screen didn't use.
+    else if (!typing && this.music.handleKey(e)) e.preventDefault();
   }
 
   // ------------------------------------------------------------------ import
@@ -607,20 +664,24 @@ export class Game {
       }
     }
     if (files.length === 0) return;
-    this.toast(`Importing ${files.length > 1 ? `${files.length} files` : files[0].name}…`);
+    // ProgressNotification: "Importing…" with progress, completing into "Imported N beatmaps!".
+    const task = this.progressNotification(`Importing ${files.length > 1 ? `${files.length} files` : files[0].name}...`);
     try {
-      const result = await importFiles(files, this.starRater);
+      const result = await importFiles(files, this.starRater, (done, total) => {
+        task.setProgress(total > 0 ? done / total : 0);
+        task.setText(`Imported ${done} of ${total} beatmaps.`);
+      });
       if (result.imported.length > 0) {
         this.library.add(result.imported);
-        const count = result.imported.reduce((a, s) => a + s.beatmaps.length, 0);
-        this.toast(`Imported ${result.imported.length} beatmap set${result.imported.length > 1 ? 's' : ''} (${count} difficulties)`, 'success');
         const first = result.imported[0];
+        const present = () => this.select(first, first.beatmaps[0]);
+        task.complete(result.imported.length === 1 ? `Imported ${first.beatmaps[0].artist} - ${first.beatmaps[0].title}!` : `Imported ${result.imported.length} beatmaps!`, present);
         this.select(first, first.beatmaps[0]);
-      }
+      } else if (result.errors.length === 0) task.fail('No beatmaps found in the selected files');
+      else task.fail('Import failed!');
       for (const err of result.errors.slice(0, 3)) this.toast(err, 'error', 6000);
-      if (result.imported.length === 0 && result.errors.length === 0) this.toast('No beatmaps found in the selected files', 'error');
     } catch (e) {
-      this.toast(`Import failed: ${e instanceof Error ? e.message : String(e)}`, 'error', 6000);
+      task.fail(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 

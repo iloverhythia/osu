@@ -15,6 +15,16 @@ export abstract class Screen {
     return false;
   }
 
+  /** Whether the global track loops while this screen shows (song select loops the preview). */
+  get trackLoops(): boolean {
+    return false;
+  }
+
+  /** IOsuScreen.AllowTrackControl */
+  get allowTrackControl(): boolean {
+    return true;
+  }
+
   /** Whether the menu cursor is shown (the osu! ruleset provides its own cursor during gameplay). */
   get cursorVisible(): boolean {
     return true;
