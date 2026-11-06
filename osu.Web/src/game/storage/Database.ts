@@ -56,6 +56,8 @@ export interface ScoreRecord {
   mods: string[];
   modSettings?: import('../mods/Mods').ModSettings;
   statistics: Record<string, number>;
+  /** ScoreInfo.MaximumStatistics (older records don't have it; their judged statistics stand in). */
+  maximumStatistics?: Record<string, number>;
   date: number;
   pp?: number;
   player: string;

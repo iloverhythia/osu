@@ -285,7 +285,7 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
       {
         header: 'General',
         items: [
-          dropdown('Score display mode', 'gameplay.scoreDisplayMode', [['standardised', 'Standardised'], ['classic', 'Classic']] as const, { keywords: ['scoring'], unavailable: true }),
+          dropdown('Score display mode', 'gameplay.scoreDisplayMode', [['standardised', 'Standardised'], ['classic', 'Classic']] as const, { keywords: ['scoring'] }),
           check('Hit lighting', 'gameplay.hitLighting', { also: ['osu.hitLighting', 'fruits.hitLighting'] }),
           check('Star fountains', 'gameplay.starFountains'),
         ],
@@ -310,10 +310,10 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
         header: 'Beatmap',
         items: [
           check('Beatmap skins', 'skin.beatmapSkins'),
-          check('Beatmap colours', 'skin.beatmapColours', { unavailable: true }),
-          check('Beatmap hitsounds', 'skin.beatmapHitsounds', { unavailable: true }),
+          check('Beatmap colours', 'skin.beatmapColours'),
+          check('Beatmap hitsounds', 'skin.beatmapHitsounds'),
           check('Storyboard / video', 'gameplay.storyboard'),
-          slider('Combo colour normalisation', 'skin.comboColourNormalisation', 0, 1, 0.01, { percent: true, unavailable: true }),
+          slider('Combo colour normalisation', 'skin.comboColourNormalisation', 0, 1, 0.01, { percent: true }),
         ],
       },
       {
@@ -350,8 +350,8 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
         check('Snaking out sliders', 'osu.snakingOut'),
         check('Hit animations', 'osu.hitAnimations', { hint: 'When enabled, hit circles will play an animation when hit. When disabled, they will disappear almost immediately.' }),
         check('Cursor trail', 'osu.cursorTrail'),
-        check('Cursor ripples', 'osu.cursorRipples', { unavailable: true }),
-        dropdown('Playfield border style', 'osu.playfieldBorderStyle', [['none', 'None'], ['corners', 'Corners'], ['full', 'Full']] as const, { unavailable: true }),
+        check('Cursor ripples', 'osu.cursorRipples'),
+        dropdown('Playfield border style', 'osu.playfieldBorderStyle', [['none', 'None'], ['corners', 'Corners'], ['full', 'Full']] as const),
       ];
     } else if (r.id === 1) {
       const hitAnimations = bindSetting<boolean>('taiko.hitAnimations');
@@ -368,7 +368,7 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
       items = [
         dropdown('Scrolling direction', 'mania.scrollDirection', [['down', 'Down'], ['up', 'Up']] as const),
         slider('Scroll speed', 'mania.scrollSpeed', 1, 40, 0.1, { keyboardStep: 1, format: v => `${Math.floor(MAX_TIME_RANGE / v)}ms (speed ${v.toFixed(1)})` }),
-        check('Timing-based note colouring', 'mania.timingBasedColouring', { keywords: ['color'], unavailable: true }),
+        check('Timing-based note colouring', 'mania.timingBasedColouring', { keywords: ['color'] }),
         check('Touch overlay', 'mania.touchOverlay', { unavailable: true }),
       ];
     }

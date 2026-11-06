@@ -232,3 +232,25 @@ export async function deleteSkin(id: string): Promise<void> {
   await SkinStore.delete(id);
   if (settings.get<string | null>(ACTIVE_SKIN_SETTING, null) === id) settings.set(ACTIVE_SKIN_SETTING, null);
 }
+
+/**
+ * BeatmapSkinProvidingContainer lookup permissions: textures / drawables / configuration follow BeatmapSkins,
+ * colours follow BeatmapColours and samples follow BeatmapHitsounds. Returns null when nothing is allowed.
+ */
+export function restrictBeatmapSkin(skin: LoadedSkin | null, allow: { skins: boolean; colours: boolean; hitsounds: boolean }): LoadedSkin | null {
+  if (!skin) return null;
+  if (!allow.skins && !allow.colours && !allow.hitsounds) return null;
+  if (allow.skins && allow.colours && allow.hitsounds) return skin;
+  return new Proxy(skin, {
+    get(target, prop, receiver) {
+      if (!allow.skins && (prop === 'getTexture' || prop === 'getSkinTexture')) return () => null;
+      if (!allow.skins && (prop === 'getConfig' || prop === 'lookup')) return () => undefined;
+      if (!allow.skins && prop === 'maniaConfig') return () => null;
+      if (!allow.colours && prop === 'comboColours') return null;
+      if (!allow.colours && prop === 'customColour') return () => null;
+      if (!allow.hitsounds && (prop === 'getSample' || prop === 'getHitSample')) return () => null;
+      const v = Reflect.get(target, prop, receiver);
+      return typeof v === 'function' ? v.bind(target) : v;
+    },
+  });
+}

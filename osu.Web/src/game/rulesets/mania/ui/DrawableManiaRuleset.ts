@@ -18,6 +18,7 @@ import type { ManiaPlayableBeatmap } from '../ManiaPlayableBeatmap';
 import { tagFor } from '../ManiaPlayableBeatmap';
 import { HoldNote, TailNote, type HeadNote, type HoldNoteBody, type ManiaHitObject, type Note } from '../objects/ManiaHitObject';
 import { generateManiaAutoplay, type ManiaReplayFrame } from '../replays/ManiaAutoGenerator';
+import { beatDivisorColour, getClosestBeatDivisor } from '../../../beatmaps/BeatDivisor';
 import { columnColour, css, darkenC4, lightenC4, mixC4, type RGB } from './ManiaColours';
 import { computeScrollTime, MAX_TIME_RANGE, SequentialScroll } from './ScrollAlgorithm';
 import { Anim } from './Anim';
@@ -323,6 +324,20 @@ export class DrawableManiaRuleset implements DrawableRuleset {
   private lastCombo = 0;
   private flashlightSize = FLASHLIGHT_SIZE;
   private lastUpdateTime: number | null = null;
+  private readonly timingBasedColouring: boolean;
+  private readonly snapTints = new Map<number, RGB | null>();
+
+  /** DrawableNote.updateSnapColour: BindableBeatDivisor.GetColourFor(GetClosestBeatDivisor(StartTime)) when enabled. */
+  private snapTint(time: number): RGB | null {
+    if (!this.timingBasedColouring) return null;
+    let t = this.snapTints.get(time);
+    if (t === undefined) {
+      const c = beatDivisorColour(getClosestBeatDivisor(this.playable.source.controlPoints, time));
+      t = c[0] === 255 && c[1] === 255 && c[2] === 255 ? null : c;
+      this.snapTints.set(time, t);
+    }
+    return t;
+  }
 
   constructor(
     private readonly playable: ManiaPlayableBeatmap,
@@ -331,6 +346,7 @@ export class DrawableManiaRuleset implements DrawableRuleset {
     const settings = ctx.settings;
     const scrollSpeed = Math.min(40, Math.max(1, Number(settings.get('mania.scrollSpeed', 8)) || 8));
     this.upwards = settings.get<string>('mania.scrollDirection', 'down') === 'up';
+    this.timingBasedColouring = settings.get<boolean>('mania.timingBasedColouring', false);
     // DrawableManiaRuleset.updateTimeRange: TargetTimeRange * tempo * frequency (hit position at the default 110 => scale 1).
     this.timeRange = Math.min(MAX_TIME_RANGE, Math.max(1, computeScrollTime(scrollSpeed) * ctx.rate));
     this.leadInTime = this.timeRange;
@@ -1141,7 +1157,7 @@ export class DrawableManiaRuleset implements DrawableRuleset {
           if (startPos < minPos) continue;
           const alpha = this.objectAlpha(obj, time);
           if (alpha <= 0) continue;
-          this.drawNote(ctx, c, this.yAt(startPos, l), alpha, false);
+          this.drawNote(ctx, c, this.yAt(startPos, l), alpha, false, this.snapTint(obj.startTime));
         } else {
           this.drawHold(ctx, l, c, obj, time, currentRel, startPos, minPos);
         }
@@ -1275,11 +1291,11 @@ export class DrawableManiaRuleset implements DrawableRuleset {
 
     // DrawableHoldNoteTail: hidden instantly once hit, FadeOut(150, In) when missed.
     const tailAlpha = this.objectAlpha(hold.tail, time);
-    if (tailAlpha > 0) this.drawTail(ctx, c, this.yAt(endPos, l), tailAlpha, hitting);
+    if (tailAlpha > 0) this.drawTail(ctx, c, this.yAt(endPos, l), tailAlpha, hitting, this.snapTint(hold.tail.startTime));
     ctx.restore();
 
     // Head (never hidden on its own; follows the hit position while held)
-    this.drawNote(ctx, c, this.yAt(headPos, l), 1, true);
+    this.drawNote(ctx, c, this.yAt(headPos, l), 1, true, this.snapTint(hold.startTime));
     ctx.restore();
   }
 
@@ -1330,7 +1346,9 @@ export class DrawableManiaRuleset implements DrawableRuleset {
   }
 
   /** ArgonNotePiece / ArgonHoldNoteHeadPiece. `edgeY` is the edge of the note nearest to the hit target. */
-  private drawNote(ctx: CanvasRenderingContext2D, c: ColumnState, edgeY: number, alpha: number, isHead: boolean): void {
+  private drawNote(ctx: CanvasRenderingContext2D, c: ColumnState, edgeY: number, alpha: number, isHead: boolean, tint: RGB | null = null): void {
+    // DrawableNote.Colour (timing-based note colouring) tints the whole piece.
+    const col = tint ? mul(c.colour, tint) : c.colour;
     const w = c.width;
     const h = NOTE_HEIGHT;
     const accentH = h * NOTE_ACCENT_RATIO;
@@ -1350,15 +1368,15 @@ export class DrawableManiaRuleset implements DrawableRuleset {
 
       // Accent container (BottomLeft, Height = NOTE_ACCENT_RATIO, CornerRadius): GradientVertical(accent.Lighten(0.1f), accent)
       const accent = ctx.createLinearGradient(0, h - accentH, 0, h);
-      accent.addColorStop(0, css(lightenC4(c.colour, 0.1)));
-      accent.addColorStop(1, css(c.colour));
+      accent.addColorStop(0, css(lightenC4(col, 0.1)));
+      accent.addColorStop(1, css(col));
       ctx.fillStyle = accent;
       ctx.beginPath();
       roundRectPath(ctx, 0, h - accentH, w, accentH, CORNER_RADIUS);
       ctx.fill();
 
       // Circle (BottomLeft, Height = CORNER_RADIUS * 2)
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = tint ? css(tint) : '#fff';
       ctx.beginPath();
       roundRectPath(ctx, 0, h - CORNER_RADIUS * 2, w, CORNER_RADIUS * 2, CORNER_RADIUS);
       ctx.fill();
@@ -1376,7 +1394,8 @@ export class DrawableManiaRuleset implements DrawableRuleset {
   }
 
   /** ArgonHoldNoteTailPiece: `edgeY` is the edge nearest to the hit target. */
-  private drawTail(ctx: CanvasRenderingContext2D, c: ColumnState, edgeY: number, alpha: number, hitting: number): void {
+  private drawTail(ctx: CanvasRenderingContext2D, c: ColumnState, edgeY: number, alpha: number, hitting: number, tint: RGB | null = null): void {
+    const col = tint ? mul(c.colour, tint) : c.colour;
     const w = c.width;
     const h = NOTE_HEIGHT;
     const accentH = h * NOTE_ACCENT_RATIO;
@@ -1398,18 +1417,18 @@ export class DrawableManiaRuleset implements DrawableRuleset {
       roundRectPath(ctx, 0, h - accentH, w, accentH, CORNER_RADIUS);
       ctx.clip();
       // foreground: accent.Darken(0.6f)
-      ctx.fillStyle = css(darkenC4(c.colour, 0.6));
+      ctx.fillStyle = css(darkenC4(col, 0.6));
       ctx.fillRect(0, h - accentH, w, accentH);
       ctx.globalCompositeOperation = 'lighter';
       // hittingLayer
       if (hitting > 0.002) {
-        ctx.fillStyle = css(lightenC4(c.colour, 0.2), 0.3 * hitting);
+        ctx.fillStyle = css(lightenC4(col, 0.2), 0.3 * hitting);
         ctx.fillRect(0, h - accentH, w, accentH);
       }
       // foregroundAdditive (Height 0.5, additive): GradientVertical(accent.Opacity(0.4f), accent.Opacity(0))
       const add = ctx.createLinearGradient(0, h - accentH, 0, h - accentH / 2);
-      add.addColorStop(0, css(c.colour, 0.4));
-      add.addColorStop(1, css(c.colour, 0));
+      add.addColorStop(0, css(col, 0.4));
+      add.addColorStop(1, css(col, 0));
       ctx.fillStyle = add;
       ctx.fillRect(0, h - accentH, w, accentH / 2);
     });

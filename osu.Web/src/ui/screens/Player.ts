@@ -4,6 +4,7 @@
 // BreakTracker, ComboEffects, FailAnimationContainer and the HUD (HUDOverlay + the Argon default layout). The HUD and overlay
 // components live in src/ui/hud.
 
+import { getDisplayScore } from '../../game/scoring/DisplayScore';
 import type { AudioEngine, LoopingSample, Track } from '../../framework/audio/AudioEngine';
 import { GameplayClock } from '../../framework/audio/GameplayClock';
 import { settings } from '../../framework/Settings';
@@ -19,7 +20,7 @@ import type { JudgementResult } from '../../game/scoring/Judgement';
 import type { ScoreProcessor } from '../../game/scoring/ScoreProcessor';
 import type { ScoreRank } from '../../game/scoring/ScoreRank';
 import { createSkin } from '../../game/Skin';
-import { loadActiveSkin, loadBeatmapSkin, resolveSkinHitSample, type LoadedSkin } from '../../game/skinning';
+import { loadActiveSkin, loadBeatmapSkin, resolveSkinHitSample, restrictBeatmapSkin, type LoadedSkin } from '../../game/skinning';
 import { loadStoryboard, type StoryboardPlayer } from '../../game/storyboard';
 import type { DrawableRuleset, GameplayContext, LoopHandle, PlayableBeatmap, Ruleset } from '../../game/rulesets/Ruleset';
 import { h } from '../dom';
@@ -67,6 +68,7 @@ export class PlayerScreen extends Screen {
   private readonly bgDimEl: HTMLDivElement;
   private bgDimOpacity = -1;
   private bgBlur = 0;
+  private beatmapHitsounds = true;
   /** Key of what's currently drawn on the background layer (image + size), to redraw only when it changes. */
   private bgCanvasKey = '';
   private storyboard: StoryboardPlayer | null = null;
@@ -259,12 +261,17 @@ export class PlayerScreen extends Screen {
     this.track = track;
     this.track.preservePitch = this.mods.preservePitch;
 
+    // OsuSetting.BeatmapSkins / BeatmapColours / BeatmapHitsounds
+    const beatmapSkinAllow = { skins: settings.get('skin.beatmapSkins', true), colours: settings.get('skin.beatmapColours', true), hitsounds: settings.get('skin.beatmapHitsounds', true) };
+    this.beatmapHitsounds = beatmapSkinAllow.hitsounds;
     const [bg, resolver, storyboard, userSkin, beatmapSkin] = await Promise.all([
       this.working.loadBackgroundImage(),
       this.working.preloadSamples(this.audio, this.collectSampleLookups()),
       settings.get('gameplay.storyboard', true) ? loadStoryboard(this.working, this.beatmap, this.audio).catch(() => null) : Promise.resolve(null),
       loadActiveSkin(this.audio).catch(() => null),
-      settings.get('skin.beatmapSkins', true) ? loadBeatmapSkin(this.working.set, this.audio, this.working.entry.filename).catch(() => null) : Promise.resolve(null),
+      beatmapSkinAllow.skins || beatmapSkinAllow.colours || beatmapSkinAllow.hitsounds
+        ? loadBeatmapSkin(this.working.set, this.audio, this.working.entry.filename).then(s => restrictBeatmapSkin(s, beatmapSkinAllow)).catch(() => null)
+        : Promise.resolve(null),
       track.ready,
     ]);
     this.background = bg;
@@ -377,7 +384,9 @@ export class PlayerScreen extends Screen {
 
   private createContext(): GameplayContext {
     const self = this;
-    const skin = createSkin(this.beatmap.comboColours.length > 0 ? this.beatmap.comboColours : null, this.beatmap.customColours, this.skins);
+    // Beatmap [Colours] come through the beatmap skin's colour lookups (BeatmapColours).
+    const beatmapColours = settings.get('skin.beatmapColours', true);
+    const skin = createSkin(beatmapColours && this.beatmap.comboColours.length > 0 ? this.beatmap.comboColours : null, beatmapColours ? this.beatmap.customColours : {}, this.skins);
     return {
       mods: this.mods,
       skin,
@@ -403,7 +412,7 @@ export class PlayerScreen extends Screen {
   /** As in lazer: beatmap samples first, then each skin across all lookup names, then the default samples. */
   private resolveSample(s: HitSampleInfo): AudioBuffer | null {
     for (const name of s.lookupNames) {
-      if (!name.startsWith('beatmap:')) continue;
+      if (!name.startsWith('beatmap:') || !this.beatmapHitsounds) continue;
       if (this.working.isSilenced(name)) return null;
       const b = this.sampleResolver(name);
       if (b) return b;
@@ -1182,7 +1191,8 @@ export class PlayerScreen extends Screen {
     // HUD
     if (this.hud) {
       this.hud.update(now, {
-        totalScore: this.scoreProcessor.totalScore,
+        // GameplayScoreCounter: ScoreProcessor.GetDisplayScore(OsuSetting.ScoreDisplayMode)
+        totalScore: getDisplayScore(this.ruleset.id, this.scoreProcessor.totalScore, this.scoreProcessor.maximumStatistics),
         accuracy: this.scoreProcessor.accuracy,
         combo: this.scoreProcessor.combo,
         health: this.healthProcessor.health,

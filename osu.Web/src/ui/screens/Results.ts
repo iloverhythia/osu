@@ -247,6 +247,7 @@ export class ResultsScreen extends Screen {
         mods: r.mods.list,
         modSettings: r.mods.settings,
         statistics: Object.fromEntries([...r.statistics].map(([k, v]) => [HitResult[k], v])),
+        maximumStatistics: Object.fromEntries([...r.maximumStatistics].map(([k, v]) => [HitResult[k], v])),
         date: r.date,
         pp: computePp(r),
         player: settings.get('ui.username', 'Guest'),

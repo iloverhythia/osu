@@ -5,6 +5,7 @@
 // Contracted/ContractedPanelMiddleContent.cs, Contracted/ContractedPanelTopContent.cs and
 // osu.Game/Beatmaps/Drawables/StarRatingDisplay.cs. Torus is substituted by Exo 2.
 
+import { getDisplayScore } from '../../game/scoring/DisplayScore';
 import { MOD_BY_ACRONYM, MOD_TYPE_COLOURS } from '../../game/mods/Mods';
 import { HitResult } from '../../game/scoring/HitResult';
 import type { ScoreRank } from '../../game/scoring/ScoreRank';
@@ -470,7 +471,7 @@ class ExpandedPanelMiddleContent implements Content {
       this.appeared = true;
       const t = this.withFlair ? this.appearAt : now;
       this.scoreCounter.el.style.opacity = '1';
-      this.scoreCounter.set(this.score.totalScore, t);
+      this.scoreCounter.set(getDisplayScore(this.score.ruleset.id, this.score.totalScore, this.score.maximumStatistics), t);
       this.statistics.forEach((s, i) => s.appear(t + 200 * i));
       if (!this.withFlair) {
         // FinishTransforms(true)
@@ -533,7 +534,7 @@ class ContractedPanelMiddleContent implements Content {
         h('div', { class: 'cp-stats', style: { marginTop: '10px' } }, stat('Max Combo', `x${score.maxCombo}`), stat('Accuracy', formatAccuracy(score.accuracy))),
         h('div', { class: 'cp-mods' }, difficultyIcon(score.ruleset.id, score.working.entry.stars ?? 0), modIcons(score, 'cp-mod-list')),
       ),
-      h('div', { class: 'cp-bottom' }, h('div', { class: 'cp-score' }, formatN0(score.totalScore)), this.rankCanvas),
+      h('div', { class: 'cp-bottom' }, h('div', { class: 'cp-score' }, formatN0(getDisplayScore(score.ruleset.id, score.totalScore, score.maximumStatistics))), this.rankCanvas),
     );
   }
 

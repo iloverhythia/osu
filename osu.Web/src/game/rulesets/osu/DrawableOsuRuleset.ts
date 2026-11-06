@@ -20,6 +20,7 @@ import type { OsuPlayableBeatmap } from './beatmap';
 import { OsuLegacySkinRenderer, type OsuLegacyHost } from './legacySkin';
 import { osuPlayfieldTransform } from './playfield';
 import { resolveComboColours } from '../../skinning/SkinSource';
+import { normaliseComboColour } from '../../skinning/HSPAColour';
 import { generateOsuAutoplay } from './OsuAutoGenerator';
 import { OsuFlashlight, OsuModAutopilot, OsuModHidden, OsuModRelax, isBreakTime, spunOutRotation, type RelaxPlayfield } from './mods';
 import { SpinnerSpinHistory, SpinnerSpmCalculator, spinningSampleFrequency } from './spinner';
@@ -46,6 +47,7 @@ import {
   type RingParticle,
 } from './argon';
 import {
+  calculateScaleFromCircleSize,
   HitCircle,
   OsuHitObject,
   PLAYFIELD_WIDTH,
@@ -231,6 +233,12 @@ export class DrawableOsuRuleset implements DrawableRuleset {
   /** Cursor in osu! playfield coordinates. */
   private cursor: Vec2 = { x: PLAYFIELD_WIDTH / 2, y: 384 / 2 };
   private pressed = new Set<Action>();
+  private readonly showRipples: boolean;
+  private readonly borderStyle: string;
+  private readonly borderPadding: number;
+  /** CursorRippleVisualiser: active ripples (playfield position, gameplay time of the press). */
+  private ripples: { x: number; y: number; t: number }[] = [];
+  private lastRippleCheck = -Infinity;
   private lastUpdateTime = -Infinity;
   private firstActiveIndex = 0;
   private followPointIndex = 0;
@@ -286,6 +294,10 @@ export class DrawableOsuRuleset implements DrawableRuleset {
     this.flashlight = mods.has('FL') ? new OsuFlashlight() : null;
     this.showFollowPoints = settings.get('osu.followPoints', true);
     this.showCursorTrail = settings.get('osu.cursorTrail', true);
+    this.showRipples = settings.get('osu.cursorRipples', false);
+    this.borderStyle = settings.get('osu.playfieldBorderStyle', 'none');
+    // OsuPlayfield.ApplyCircleSizeToPlayfieldBorder: padding of -OBJECT_RADIUS * scale.
+    this.borderPadding = -64 * calculateScaleFromCircleSize(playable.difficulty.circleSize, true);
     this.hitLighting = settings.get('osu.hitLighting', true);
     this.hitAnimations = settings.get('osu.hitAnimations', true);
     this.snakingIn = settings.get('osu.snakingIn', true);
@@ -300,7 +312,7 @@ export class DrawableOsuRuleset implements DrawableRuleset {
 
     const colours = resolveComboColours(ctx.skin);
     const usingLegacy = !!ctx.skin.sources && ctx.skin.sources.length > 0;
-    this.comboColours = colours === DEFAULT_COMBO_COLOURS && !usingLegacy ? ARGON_COMBO_COLOURS : colours;
+    this.comboColours = (colours === DEFAULT_COMBO_COLOURS && !usingLegacy ? ARGON_COMBO_COLOURS : colours).map(c => normaliseComboColour(c));
 
     const first = this.objects[0];
     // DrawableOsuRuleset.GameplayStartTime
@@ -459,6 +471,9 @@ export class DrawableOsuRuleset implements DrawableRuleset {
   private press(action: Action, time: number): void {
     if (this.pressed.has(action)) return;
     this.pressed.add(action);
+    // CursorRippleVisualiser.OnPressed (not while rewinding)
+    if (this.showRipples && time >= this.lastRippleCheck) this.ripples.push({ x: this.cursor.x, y: this.cursor.y, t: time });
+    this.lastRippleCheck = time;
     // OsuCursorContainer.OnPressed
     this.downCount++;
     this.updateExpandedState(time);
@@ -1316,6 +1331,7 @@ export class DrawableOsuRuleset implements DrawableRuleset {
 
     const L = this.legacy;
     L?.beginFrame(time);
+    if (this.borderStyle !== 'none') this.drawPlayfieldBorder(g);
 
     let last = this.firstActiveIndex;
     while (last < this.objects.length && this.objects[last].startTime - this.objects[last].timePreempt <= time) last++;
@@ -1354,7 +1370,8 @@ export class DrawableOsuRuleset implements DrawableRuleset {
       } else this.drawApproachCircle(g, c, h, time);
     }
 
-    // Cursor (OsuPlayfield's cursor container)
+    // Cursor (OsuPlayfield's cursor container): ripples, then trail and cursor.
+    if (this.ripples.length > 0) this.drawRipples(g, time);
     if (L && (L.has.cursor || L.has.cursorTrail)) {
       g.restore();
       L.drawCursor(g, this.cursor.x, this.cursor.y, this.pressed.size > 0, time, this.scale, this.offsetX, this.offsetY, this.cursorScale, this.showCursorTrail, this.cursorScale);
@@ -1843,6 +1860,52 @@ export class DrawableOsuRuleset implements DrawableRuleset {
   }
 
   /** OsuCursor (ArgonCursor) + ArgonCursorTrail, in playfield space. */
+  /** PlayfieldBorder: 2px white lines from each corner, 5% of the side long (Corners) or meeting in the middle (Full). */
+  private drawPlayfieldBorder(g: CanvasRenderingContext2D): void {
+    const p = this.borderPadding;
+    const x0 = p;
+    const y0 = p;
+    const w = 512 - 2 * p;
+    const hgt = 384 - 2 * p;
+    const len = this.borderStyle === 'full' ? 0.5 : 0.05;
+    const t = 2;
+    g.save();
+    g.fillStyle = '#fff';
+    const lw = w * len;
+    const lh = hgt * len;
+    // Horizontal lines
+    g.fillRect(x0, y0, lw, t);
+    g.fillRect(x0 + w - lw, y0, lw, t);
+    g.fillRect(x0, y0 + hgt - t, lw, t);
+    g.fillRect(x0 + w - lw, y0 + hgt - t, lw, t);
+    // Vertical lines
+    g.fillRect(x0, y0, t, lh);
+    g.fillRect(x0 + w - t, y0, t, lh);
+    g.fillRect(x0, y0 + hgt - lh, t, lh);
+    g.fillRect(x0 + w - t, y0 + hgt - lh, t, lh);
+    g.restore();
+  }
+
+  /** CursorRipple: ScaleTo(0.1) → 1 over 700ms (Easing.Out), FadeOutFromOne(700); DefaultCursorRipple = RingPiece(3) at OBJECT_DIMENSIONS, alpha 0.1, additive. */
+  private drawRipples(g: CanvasRenderingContext2D, time: number): void {
+    this.ripples = this.ripples.filter(r => time - r.t < 700 && time >= r.t);
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    g.strokeStyle = '#fff';
+    for (const r of this.ripples) {
+      const p = (time - r.t) / 700;
+      const scale = (0.1 + 0.9 * applyEasing(Easing.Out, p)) * this.cursorScale;
+      const alpha = 0.1 * (1 - p);
+      if (alpha <= 0) continue;
+      g.globalAlpha = alpha;
+      g.lineWidth = 3 * scale;
+      g.beginPath();
+      g.arc(r.x, r.y, (64 - 1.5) * scale, 0, Math.PI * 2);
+      g.stroke();
+    }
+    g.restore();
+  }
+
   private drawCursor(g: CanvasRenderingContext2D, time: number, withTrail: boolean): void {
     const size = CURSOR_SIZE * this.cursorScale;
     if (withTrail && this.showCursorTrail) {

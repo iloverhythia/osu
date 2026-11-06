@@ -3,6 +3,7 @@
 // .StatisticDifficulty, .Statistic), BeatmapDetailsArea.cs (+ .Header, .WedgeSelector), BeatmapMetadataWedge.cs (+ .MetadataDisplay,
 // .TagsLine; offline parts only), BeatmapLeaderboardWedge.cs + BeatmapLeaderboardScore.cs (local scope) and NoResultsPlaceholder.cs.
 
+import { getDisplayScore } from '../../game/scoring/DisplayScore';
 import type { Beatmap } from '../../game/beatmaps/Beatmap';
 import type { WorkingBeatmap } from '../../game/beatmaps/WorkingBeatmap';
 import { MOD_BY_ACRONYM, ModSet } from '../../game/mods/Mods';
@@ -815,7 +816,7 @@ function scoreRow(host: SongSelectHost, s: ScoreRecord, rank: number): HTMLDivEl
         'div',
         { class: 'lbs-total' },
         h('div', { class: 'lbs-total-bg', style: { background: `linear-gradient(90deg, ${css(bg, 0)}, ${css(bg)}), linear-gradient(90deg, ${css(bg, 0)}, ${css(rankColour, 0.5)})` } }),
-        h('div', { class: 'lbs-total-flow' }, h('div', { class: 'lbs-unshear lbs-score' }, Math.round(s.totalScore).toLocaleString('en-US').padStart(7, '0').replace(/^(\d)/, '$1')), h('div', { class: 'lbs-unshear' }, mods)),
+        h('div', { class: 'lbs-total-flow' }, h('div', { class: 'lbs-unshear lbs-score' }, Math.round(getDisplayScore(s.rulesetId, s.totalScore, s.maximumStatistics ?? s.statistics)).toLocaleString('en-US').padStart(7, '0').replace(/^(\d)/, '$1')), h('div', { class: 'lbs-unshear' }, mods)),
       ),
     ),
   );

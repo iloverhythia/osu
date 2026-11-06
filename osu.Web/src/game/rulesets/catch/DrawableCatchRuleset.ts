@@ -25,6 +25,7 @@ import {
 import { drawBanana, drawCatcherPlate, drawDroplet, drawFruit, drawHitExplosion, HYPER_DASH_COLOUR, type PieceParams } from './pieces';
 import { CatchLegacySkinRenderer, type CatcherAnimationState } from './legacySkin';
 import { skinComboColour } from '../../skinning/SkinSource';
+import { normaliseComboColour } from '../../skinning/HSPAColour';
 
 /** Height of the falling area in playfield units: stable fruits fall from y = -100 down to the catcher at y = 340. */
 const FALL_HEIGHT = 440;
@@ -81,7 +82,7 @@ class PalpableEntry {
     } else {
       this.kind = obj instanceof TinyDroplet ? PieceKind.TinyDroplet : obj instanceof Droplet ? PieceKind.Droplet : PieceKind.Fruit;
       // PalpableCatchHitObject.GetComboColour: IndexInBeatmap + 1
-      this.colour = skinComboColour(ctx.skin, obj.indexInBeatmap + 1);
+      this.colour = normaliseComboColour(skinComboColour(ctx.skin, obj.indexInBeatmap + 1));
       this.startScale = 1;
       this.endAngle = 0;
       if (this.kind === PieceKind.Fruit) {
