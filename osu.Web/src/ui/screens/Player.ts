@@ -63,6 +63,11 @@ export class PlayerScreen extends Screen {
   private track!: Track;
   private clock!: GameplayClock;
   private background: HTMLImageElement | null = null;
+  private readonly bgCanvas: HTMLCanvasElement;
+  private readonly bgDimEl: HTMLDivElement;
+  private bgDimOpacity = -1;
+  /** Key of what's currently drawn on the background layer (image + size), to redraw only when it changes. */
+  private bgCanvasKey = '';
   private storyboard: StoryboardPlayer | null = null;
   private skins: LoadedSkin[] = [];
   private sampleResolver: (name: string) => AudioBuffer | null | undefined = () => undefined;
@@ -165,7 +170,13 @@ export class PlayerScreen extends Screen {
     this.playback = replay;
     this.canvas = h('canvas', { class: 'game' });
     this.canvas.style.visibility = 'hidden';
-    this.g = this.canvas.getContext('2d', { alpha: false, desynchronized: true } as CanvasRenderingContext2DSettings) as CanvasRenderingContext2D;
+    // The beatmap background lives on its own layer below the game canvas and is only redrawn on resize:
+    // re-scaling a full-screen image into the game canvas every frame is very expensive at high resolutions.
+    this.bgCanvas = h('canvas', { class: 'game game-bg' });
+    this.bgCanvas.style.visibility = 'hidden';
+    // UserDimContainer's dim is a black layer composited by the browser (no per-frame full-screen fill).
+    this.bgDimEl = h('div', { class: 'game-bg-dim' });
+    this.g = this.canvas.getContext('2d', { alpha: true, desynchronized: true } as CanvasRenderingContext2DSettings) as CanvasRenderingContext2D;
     const e = working.entry;
     const unicode = settings.get('ui.preferUnicode', false);
     this.loader = new PlayerLoaderView({
@@ -198,6 +209,8 @@ export class PlayerScreen extends Screen {
 
     this.el.classList.add('player-loading');
     this.el.append(
+      this.bgCanvas,
+      this.bgDimEl,
       this.canvas,
       this.replayLabel,
       this.holdForMenu.el,
@@ -779,9 +792,13 @@ export class PlayerScreen extends Screen {
   };
 
   private resize = (): void => {
-    const dpr = Math.min(3, (window.devicePixelRatio || 1) * settings.get('graphics.renderScale', 1));
     const w = this.canvas.clientWidth || window.innerWidth;
     const hgt = this.canvas.clientHeight || window.innerHeight;
+    let dpr = Math.min(3, (window.devicePixelRatio || 1) * settings.get('graphics.renderScale', 1));
+    // Canvas 2D cost grows with pixel count; cap the backing store at ~4.2 megapixels (2560×1640) so
+    // high-density / 4K screens stay smooth. The render resolution setting can still lower it further.
+    const MAX_PIXELS = 2560 * 1640;
+    if (w * hgt * dpr * dpr > MAX_PIXELS) dpr = Math.sqrt(MAX_PIXELS / (w * hgt));
     this.canvas.width = Math.round(w * dpr);
     this.canvas.height = Math.round(hgt * dpr);
     this.viewW = w;
@@ -802,6 +819,7 @@ export class PlayerScreen extends Screen {
     this.lowPass.to(Math.min(22049, this.audio.ctx.sampleRate / 2), 300, Easing.None, now);
     this.el.classList.remove('player-loading');
     this.canvas.style.visibility = '';
+    this.bgCanvas.style.visibility = '';
     this.game.setBackgroundDim(1, 0);
     this.resize();
     this.enteredAt = now;
@@ -1192,14 +1210,35 @@ export class PlayerScreen extends Screen {
     return Math.max(settings.get('gameplay.backgroundDim', 0.7) - lighten, 0);
   }
 
+  /** Draws the (cover-fitted) background onto its own layer; only when the image or canvas size changes. */
+  private updateBackgroundLayer(img: HTMLImageElement | null): void {
+    const c = this.bgCanvas;
+    const key = img ? `${img.src}|${this.canvas.width}x${this.canvas.height}` : `none|${this.canvas.width}x${this.canvas.height}`;
+    if (key === this.bgCanvasKey) return;
+    this.bgCanvasKey = key;
+    c.width = this.canvas.width;
+    c.height = this.canvas.height;
+    c.style.visibility = this.canvas.style.visibility;
+    const bg = c.getContext('2d', { alpha: false })!;
+    bg.fillStyle = '#000';
+    bg.fillRect(0, 0, c.width, c.height);
+    if (img) {
+      const s = Math.max(c.width / img.width, c.height / img.height);
+      const iw = img.width * s;
+      const ih = img.height * s;
+      bg.imageSmoothingQuality = 'high';
+      bg.drawImage(img, (c.width - iw) / 2, (c.height - ih) / 2, iw, ih);
+    }
+  }
+
   private render(time: number, now: number): void {
     const g = this.g;
     const dpr = this.canvas.width / (this.canvas.clientWidth || 1);
     const w = this.canvas.width / dpr;
     const hgt = this.canvas.height / dpr;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, this.canvas.width, this.canvas.height);
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.fillStyle = '#000';
-    g.fillRect(0, 0, w, hgt);
 
     // UserDimContainer: FadeColour(Gray(1 - DimLevel), 800, OutQuint) whenever the dim level changes.
     const target = this.currentDim();
@@ -1212,16 +1251,12 @@ export class PlayerScreen extends Screen {
 
     // Background (BackgroundScreenBeatmap): dimmed here unless a storyboard is drawn (then a single dim is applied after it).
     const failBg = this.failAnimation.backgroundColour(now);
-    if (this.background && !this.storyboard?.replacesBackground) {
-      const img = this.background;
-      const s = Math.max(w / img.width, hgt / img.height);
-      const iw = img.width * s;
-      const ih = img.height * s;
-      g.drawImage(img, (w - iw) / 2, (hgt - ih) / 2, iw, ih);
-      if (!this.storyboard) {
-        g.fillStyle = `rgba(0,0,0,${1 - (1 - dim) * failBg})`;
-        g.fillRect(0, 0, w, hgt);
-      }
+    const showBackground = this.background != null && !this.storyboard?.replacesBackground;
+    this.updateBackgroundLayer(showBackground ? this.background : null);
+    const layerDim = showBackground && !this.storyboard ? 1 - (1 - dim) * failBg : 0;
+    if (Math.abs(layerDim - this.bgDimOpacity) > 0.001) {
+      this.bgDimOpacity = layerDim;
+      this.bgDimEl.style.opacity = String(layerDim);
     }
 
     // Player.OnEntering: ScaleTo(0.7) → 1 over 750 (OutQuint), Delay(250).FadeIn(250); GameplayClockContainer.FadeInFromZero(750, OutQuint).

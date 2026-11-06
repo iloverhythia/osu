@@ -87,6 +87,12 @@ export function drawIcon(
  */
 export function drawCircleGlow(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, radius: number, colour: RGB, alpha: number): void {
   if (alpha <= 0.001 || radius <= 0) return;
+  const outerR = r + radius;
+  const sprite = glowSprite(ctx, `c|${q(r)}|${q(radius)}|${colour.join(',')}`, outerR * 2, outerR * 2, g => drawCircleGlowDirect(g, outerR, outerR, r, radius, colour, 1));
+  stamp(ctx, sprite, cx - outerR, cy - outerR, outerR * 2, outerR * 2, alpha);
+}
+
+function drawCircleGlowDirect(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, radius: number, colour: RGB, alpha: number): void {
   const outer = r + radius;
   const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, outer);
   const inner = Math.max(0, r) / outer;
@@ -145,6 +151,18 @@ export function drawRoundRectGlow(
   alpha: number,
 ): void {
   if (alpha <= 0.001 || radius <= 0) return;
+  // Pre-rendered once per (size, radius, colour) and stamped with globalAlpha: the glow's alpha is linear in `alpha`,
+  // so this matches drawing it directly, but costs one drawImage instead of up to 16 stroke passes per frame.
+  const pad = radius + 1;
+  const sw = w + pad * 2;
+  const sh = h + pad * 2;
+  const sprite = glowSprite(ctx, `r|${q(w)}|${q(h)}|${q(cr)}|${q(radius)}|${colour.join(',')}`, sw, sh, g =>
+    drawRoundRectGlowDirect(g, pad, pad, w, h, cr, radius, colour, 1),
+  );
+  stamp(ctx, sprite, x - pad, y - pad, sw, sh, alpha);
+}
+
+function drawRoundRectGlowDirect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, cr: number, radius: number, colour: RGB, alpha: number): void {
   const steps = Math.max(4, Math.min(16, Math.ceil(radius / 2)));
   const step = radius / steps;
   ctx.save();
@@ -221,4 +239,51 @@ export function drawSpacedText(ctx: CanvasRenderingContext2D, text: string, x: n
     cx += widths[i++] + spacing;
   }
   ctx.textAlign = prevAlign;
+}
+
+// ---------------------------------------------------------------- glow sprite cache
+
+/** Quantise sizes so animated radii reuse a handful of sprites (0.5 css px steps). */
+const q = (v: number) => Math.round(v * 2) / 2;
+
+interface Sprite {
+  canvas: HTMLCanvasElement;
+  /** Device pixels per css pixel the sprite was rendered at. */
+  scale: number;
+}
+
+const sprites = new Map<string, Sprite>();
+const MAX_SPRITES = 256;
+
+function glowSprite(ctx: CanvasRenderingContext2D, key: string, w: number, h: number, draw: (g: CanvasRenderingContext2D) => void): Sprite {
+  const t = ctx.getTransform();
+  // Render at the current device scale (quantised) so stamped glows stay sharp.
+  const scale = Math.max(0.25, Math.round(Math.hypot(t.a, t.b) * 4) / 4);
+  const fullKey = `${key}|${scale}`;
+  let s = sprites.get(fullKey);
+  if (s) {
+    // LRU: move to the end.
+    sprites.delete(fullKey);
+    sprites.set(fullKey, s);
+    return s;
+  }
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.ceil(w * scale));
+  c.height = Math.max(1, Math.ceil(h * scale));
+  const g = c.getContext('2d')!;
+  g.scale(scale, scale);
+  draw(g);
+  s = { canvas: c, scale };
+  sprites.set(fullKey, s);
+  if (sprites.size > MAX_SPRITES) sprites.delete(sprites.keys().next().value!);
+  return s;
+}
+
+function stamp(ctx: CanvasRenderingContext2D, s: Sprite, x: number, y: number, w: number, h: number, alpha: number): void {
+  const prev = ctx.globalAlpha;
+  ctx.globalAlpha = prev * Math.min(1, alpha);
+  ctx.drawImage(s.canvas, x, y, s.canvas.width / s.scale, s.canvas.height / s.scale);
+  ctx.globalAlpha = prev;
+  void w;
+  void h;
 }
