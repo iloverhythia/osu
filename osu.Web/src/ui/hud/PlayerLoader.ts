@@ -36,7 +36,7 @@ export class PlayerLoaderView {
   private readonly loadingLayer: HTMLDivElement;
   private readonly disclaimers: HTMLDivElement;
   private blackLayer: HTMLDivElement | null = null;
-  readonly disclaimerCount: number;
+  disclaimerCount = 0;
 
   constructor(info: MetadataInfo) {
     const thumb = h(
@@ -78,20 +78,22 @@ export class PlayerLoaderView {
       info.watching ? h('div', { class: 'pl-watching' }, info.watching) : null,
     );
     this.content = h('div', { class: 'pl-content' }, this.metadata);
-    this.disclaimers = h(
-      'div',
-      { class: 'pl-disclaimers' },
-      info.epilepsyWarning
-        ? h(
-            'div',
-            { class: 'pl-disclaimer' },
-            h('div', { class: 'pl-disclaimer-bar' }),
-            h('div', null, h('div', { class: 'pl-disclaimer-title' }, 'This beatmap contains scenes with rapidly flashing colours'), h('div', { class: 'pl-disclaimer-text' }, 'Please take caution if you are affected by epilepsy.')),
-          )
-        : null,
-    );
-    this.disclaimerCount = info.epilepsyWarning ? 1 : 0;
+    this.disclaimers = h('div', { class: 'pl-disclaimers' });
+    if (info.epilepsyWarning) this.addEpilepsyWarning();
     this.el = h('div', { class: 'player-loader' }, this.content, this.disclaimers);
+  }
+
+  /** PlayerLoaderDisclaimer(EpilepsyWarningTitle, EpilepsyWarningContent), added once the beatmap is decoded. */
+  addEpilepsyWarning(): void {
+    this.disclaimers.appendChild(
+      h(
+        'div',
+        { class: 'pl-disclaimer' },
+        h('div', { class: 'pl-disclaimer-bar' }),
+        h('div', null, h('div', { class: 'pl-disclaimer-title' }, 'This beatmap contains scenes with rapidly flashing colours'), h('div', { class: 'pl-disclaimer-text' }, 'Please take caution if you are affected by epilepsy.')),
+      ),
+    );
+    this.disclaimerCount++;
   }
 
   get pushDelay(): number {

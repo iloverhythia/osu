@@ -1,5 +1,5 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// Port of osu.Game.Rulesets.Catch/UI/DrawableCatchRuleset.cs, CatchPlayfield.cs, CatchPlayfieldAdjustmentContainer.cs,
+// Port of osu.Game.Rulesets.Catch/UI/DrawableCatchRuleset.cs, CatchPlayfield.cs (layer order), CatchPlayfieldAdjustmentContainer.cs,
 // CatcherArea.cs, Catcher.cs (plate / dropping / explosions), CatcherTrailDisplay.cs, CatcherTrail.cs,
 // CatchTouchInputMapper.cs, Objects/Drawables/* (falling, judgement on catch), Mods/CatchModHidden.cs,
 // Mods/CatchModFlashlight.cs and Mods/CatchModRelax.cs (mouse controls the catcher).
@@ -76,7 +76,8 @@ class PalpableEntry {
       this.startScale = 0.6 + 1.6 * r(3);
       this.rotation = 180 * (r(1) * 2 - 1);
       this.endAngle = 180 * (r(2) * 2 - 1);
-      this.layerSpeed = 0;
+      // ArgonBananaPiece is an ArgonFruitPiece: rotationRandomness = RNG.NextSingle(0.2f, 1) * (RNG.NextBool() ? -1 : 1)
+      this.layerSpeed = (0.2 + 0.8 * r(5)) * (r(6) < 0.5 ? -1 : 1);
     } else {
       this.kind = obj instanceof TinyDroplet ? PieceKind.TinyDroplet : obj instanceof Droplet ? PieceKind.Droplet : PieceKind.Fruit;
       // PalpableCatchHitObject.GetComboColour: IndexInBeatmap + 1
@@ -167,6 +168,8 @@ interface Layout {
   oy: number;
   clipTop: number;
   clipBottom: number;
+  clipLeft: number;
+  clipRight: number;
 }
 
 export class DrawableCatchRuleset implements DrawableRuleset {
@@ -218,7 +221,17 @@ export class DrawableCatchRuleset implements DrawableRuleset {
   private flashlightStart = 0;
   private flashlightDuration = 0;
   private layout: Layout | null = null;
-  private readonly piece: PieceParams = { x: 0, y: 0, radius: 0, rotation: 0, colour: [255, 255, 255], hyper: false, alpha: 1, seed: 0, layerRotation: 0 };
+  private readonly piece: PieceParams = {
+    x: 0,
+    y: 0,
+    radius: 0,
+    rotation: 0,
+    colour: [255, 255, 255],
+    hyper: false,
+    alpha: 1,
+    seed: 0,
+    layerRotation: 0,
+  };
   /** Legacy skin renderer (when a user / beatmap skin is in use). */
   private readonly legacy: CatchLegacySkinRenderer | null;
   /** Catcher.CurrentState (CatcherAnimationState), only used for legacy catcher sprites. */
@@ -539,7 +552,14 @@ export class DrawableCatchRuleset implements DrawableRuleset {
 
   private placeCaughtObject(entry: PalpableEntry, x: number, y: number, diameter: number, time: number): void {
     // caught_fruit_scale_adjust = 0.5
-    const c: CaughtObject = { entry, x, y, radius: (diameter / 2) * 0.5, rotation: this.displayRotation(entry, time), spawnTime: time };
+    const c: CaughtObject = {
+      entry,
+      x,
+      y,
+      radius: (diameter / 2) * 0.5,
+      rotation: this.displayRotation(entry, time),
+      spawnTime: time,
+    };
     // CaughtDroplet.StaysOnPlate == false
     if (entry.obj instanceof Droplet) this.dropObject(c, true, time);
     else this.caught.push(c);
@@ -614,14 +634,26 @@ export class DrawableCatchRuleset implements DrawableRuleset {
     }
 
     if (!this.lastHyperDashState && hyper)
-      this.trails.push({ time, x: this.catcher.x, kind: TrailKind.HyperDashAfterImage, state: this.catcherAnimationState, direction: this.catcher.visualDirection });
+      this.trails.push({
+        time,
+        x: this.catcher.x,
+        kind: TrailKind.HyperDashAfterImage,
+        state: this.catcherAnimationState,
+        direction: this.catcher.visualDirection,
+      });
 
     if (this.catcher.dashing || hyper) {
       const TRAIL_GENERATION_INTERVAL = 16;
       let lastDashTrailTime = -Infinity;
       for (const t of this.trails) if (t.kind !== TrailKind.HyperDashAfterImage && t.time > lastDashTrailTime) lastDashTrailTime = t.time;
       if (time - lastDashTrailTime >= TRAIL_GENERATION_INTERVAL)
-        this.trails.push({ time, x: this.catcher.x, kind: hyper ? TrailKind.HyperDashing : TrailKind.Dashing, state: this.catcherAnimationState, direction: this.catcher.visualDirection });
+        this.trails.push({
+          time,
+          x: this.catcher.x,
+          kind: hyper ? TrailKind.HyperDashing : TrailKind.Dashing,
+          state: this.catcherAnimationState,
+          direction: this.catcher.visualDirection,
+        });
     }
 
     this.lastHyperDashState = hyper;
@@ -652,8 +684,10 @@ export class DrawableCatchRuleset implements DrawableRuleset {
     const DEFAULT_FLASHLIGHT_SIZE = 203.125;
     const sizeMultiplier = this.ctx.settings.get('fruits.flashlightSizeMultiplier', 1);
     let size = DEFAULT_FLASHLIGHT_SIZE * sizeMultiplier;
-    if (this.isBreakTime(time)) size *= 1.538; // ≈ 8.0 / 5.2
-    else if (combo >= 200) size *= 0.77; // ≈ 4.0 / 5.2
+    if (this.isBreakTime(time))
+      size *= 1.538; // ≈ 8.0 / 5.2
+    else if (combo >= 200)
+      size *= 0.77; // ≈ 4.0 / 5.2
     else if (combo >= 100) size *= 0.885; // ≈ 4.6 / 5.2
     return size;
   }
@@ -683,14 +717,25 @@ export class DrawableCatchRuleset implements DrawableRuleset {
     const PLAYFIELD_SIZE_ADJUST = 0.8;
     const EXTRA_BOTTOM_SPACE = 200;
 
+    // The game's ScalingContainer (draw size preserving 1024x768).
     let u = Math.min(width / BASE_WIDTH, height / BASE_HEIGHT);
+    // scaleContainer.Scale = Math.Min(1, base_aspect_ratio / aspectRatio), where the aspect ratio is that of
+    // OsuGame.ScalingContainerTargetDrawSize (1024x768 on desktop), i.e. 1.
+    let aspectScale = 1;
     // Portrait screens (phones): let the playfield use (almost) the full width instead of 80% of a 4:3 area.
-    if (height > width) u = Math.min(height / BASE_HEIGHT, (width * 0.98) / (BASE_WIDTH * PLAYFIELD_SIZE_ADJUST));
+    if (height > width) {
+      u = Math.min(height / BASE_HEIGHT, (width * 0.98) / (BASE_WIDTH * PLAYFIELD_SIZE_ADJUST));
+      aspectScale = 1;
+    }
+    const s = u * aspectScale;
+    const cy = height / 2;
 
+    // "Visible area": RelativeSizeAxes.X, Height = 768 + 200, Y = 100 (masked), scaled around the screen centre.
     const visibleHeight = BASE_HEIGHT + EXTRA_BOTTOM_SPACE;
-    const visibleTop = height / 2 - (visibleHeight / 2) * u + (EXTRA_BOTTOM_SPACE / 2) * u;
-    const playableTop = visibleTop + BASE_HEIGHT * ((1 - PLAYFIELD_SIZE_ADJUST) / 4) * 3 * u;
-    const playableWidth = BASE_WIDTH * PLAYFIELD_SIZE_ADJUST * u;
+    const visibleTop = cy + (-(visibleHeight / 2) + EXTRA_BOTTOM_SPACE / 2) * s;
+    const visibleWidth = width / u;
+    const playableTop = visibleTop + BASE_HEIGHT * ((1 - PLAYFIELD_SIZE_ADJUST) / 4) * 3 * s;
+    const playableWidth = BASE_WIDTH * PLAYFIELD_SIZE_ADJUST * s;
     const k = playableWidth / PLAYFIELD_WIDTH;
 
     return {
@@ -702,7 +747,9 @@ export class DrawableCatchRuleset implements DrawableRuleset {
       // local y = 0 is stable y = -100
       oy: playableTop - 100 * k,
       clipTop: Math.max(0, visibleTop),
-      clipBottom: Math.min(height, visibleTop + visibleHeight * u),
+      clipBottom: Math.min(height, visibleTop + visibleHeight * s),
+      clipLeft: Math.max(0, width / 2 - (visibleWidth / 2) * s),
+      clipRight: Math.min(width, width / 2 + (visibleWidth / 2) * s),
     };
   }
 
@@ -713,66 +760,99 @@ export class DrawableCatchRuleset implements DrawableRuleset {
     const plateY = l.oy + FALL_HEIGHT * k;
     const catcherScale = this.catcher.scale;
 
+    // Catcher.FadeColour(hyperDashColour, HYPER_DASH_TRANSITION_DURATION, OutQuint) while hyper dashing. The colour applies to
+    // everything inside the Catcher: the body, the (proxied) caught objects and the hit explosions.
+    const hyperT = Math.min(1, Math.max(0, this.hyperColourValue(time)));
+    const hc = this.hyperDashColour;
+    const catcherColour: RGB = [255 + (hc[0] - 255) * hyperT, 255 + (hc[1] - 255) * hyperT, 255 + (hc[2] - 255) * hyperT];
+
     g.save();
     g.beginPath();
-    g.rect(0, l.clipTop, width, l.clipBottom - l.clipTop);
+    g.rect(l.clipLeft, l.clipTop, l.clipRight - l.clipLeft, l.clipBottom - l.clipTop);
     g.clip();
 
-    // Dropped objects (DroppedObjectContainer)
+    // DroppedObjectContainer (Catcher.applyDropAnimation)
     for (const d of this.dropped) {
       const el = time - d.startTime;
       let y = d.y;
       let x = d.x;
       if (d.explode) {
+        // MoveToY(Y - 50, 250, OutSine).Then().MoveToY(Y + 50, 500, InSine); MoveToX(X + originalX * 6, 1000)
         y = el < 250 ? d.y - 50 * outSine(el / 250) : d.y - 50 + 100 * inSine((el - 250) / 500);
         x = d.x + d.dx * Math.min(1, el / 1000);
-      } else y = d.y + 75 * inSine(el / 750);
-      const alpha = 1 - el / 750;
+      } else y = d.y + 75 * inSine(el / 750); // MoveToY(Y + 75, 750, InSine)
+      const alpha = 1 - el / 750; // FadeOut(750)
       if (alpha <= 0) continue;
-      this.drawEntry(g, d.entry, l.ox + x * k, l.oy + y * k, d.radius * k, d.rotation, alpha, time - d.spawnTime, time);
+      this.drawEntry(g, d.entry, l.ox + x * k, l.oy + y * k, d.radius * k, d.rotation, alpha, time - d.spawnTime, time, null, true);
     }
 
-    // Caught objects on the plate
+    // Catcher.CreateProxiedContent(): caught objects on the plate (inside the Catcher, so they take its colour)
     const plateBase = FALL_HEIGHT - 5 * catcherScale;
-    for (const c of this.caught) this.drawEntry(g, c.entry, catcherX + c.x * k, l.oy + (plateBase + c.y) * k, c.radius * k, c.rotation, 1, time - c.spawnTime, time);
+    for (const c of this.caught)
+      this.drawEntry(g, c.entry, catcherX + c.x * k, l.oy + (plateBase + c.y) * k, c.radius * k, c.rotation, 1, time - c.spawnTime, time, catcherColour, true);
 
-    // Falling objects
+    // HitObjectContainer proxy: falling objects
     this.renderHitObjects(g, l, time);
 
-    // Catcher area: catcher body, then trails, then hit explosions
+    // CatcherArea: catcher (body, then hit explosions), then CatcherTrailDisplay
     const catcherWidthPx = CATCHER_BASE_SIZE * catcherScale * k;
-    const hyperT = Math.min(1, Math.max(0, this.hyperColourValue(time)));
-    const hc = this.hyperDashColour;
-    // Catcher.FadeColour(hyperDashColour) while hyper dashing.
-    const bodyColour: RGB = [255 + (hc[0] - 255) * hyperT, 255 + (hc[1] - 255) * hyperT, 255 + (hc[2] - 255) * hyperT];
     const legacyCatcher = this.legacy?.has.catcher ? this.legacy : null;
     if (legacyCatcher)
-      legacyCatcher.drawCatcher(g, catcherX, plateY, k, catcherScale, this.catcher.visualDirection, this.catcherAnimationState, time - this.catcherAnimationStateTime, bodyColour);
-    else drawCatcherPlate(g, catcherX, plateY, catcherWidthPx, catcherScale * k, bodyColour, 1, width, true);
+      legacyCatcher.drawCatcher(
+        g,
+        catcherX,
+        plateY,
+        k,
+        catcherScale,
+        this.catcher.visualDirection,
+        this.catcherAnimationState,
+        time - this.catcherAnimationStateTime,
+        catcherColour,
+      );
+    else drawCatcherPlate(g, catcherX, plateY, catcherWidthPx, catcherScale * k, catcherColour, 1);
 
+    for (const e of this.explosions) {
+      // HitExplosionContainer is in catcher space; X = position in stack (playfield units, applied in catcher space)
+      const unit = e.objectScale * catcherScale * k;
+      drawHitExplosion(g, catcherX + e.x * catcherScale * k, plateY, unit, e.colour, time - e.time, e.tall, e.comboScale, catcherColour);
+    }
+
+    // CatcherTrail: Blending = Additive; dash trails (white), hyper dash trails and after-images (hyper dash colours)
     g.globalCompositeOperation = 'lighter';
-    for (const t of this.trails) {
-      const el = time - t.time;
-      const tx = l.ox + t.x * k;
-      if (t.kind === TrailKind.HyperDashAfterImage) {
-        const p = Math.min(1, el / 1200);
-        const s = 0.95 + (1.2 - 0.95) * inQuad(p);
-        if (legacyCatcher)
-          legacyCatcher.drawCatcher(g, tx, plateY - 10 * inQuad(p) * k, k, catcherScale * s, t.direction ?? 1, t.state ?? 'idle', 0, this.hyperDashAfterImageColour, 1 - p, true);
-        else drawCatcherPlate(g, tx, plateY - 10 * inQuad(p) * k, catcherWidthPx * s, catcherScale * k * s, this.hyperDashAfterImageColour, 1 - p, width, false);
-      } else {
-        const alpha = 0.4 * (1 - outQuint(el / 800));
-        const colour = t.kind === TrailKind.HyperDashing ? this.hyperDashColour : WHITE;
-        if (legacyCatcher) legacyCatcher.drawCatcher(g, tx, plateY, k, catcherScale, t.direction ?? 1, t.state ?? 'idle', 0, colour, alpha, true);
-        else drawCatcherPlate(g, tx, plateY, catcherWidthPx, catcherScale * k, colour, alpha, width, false);
+    for (const kind of TRAIL_ORDER) {
+      for (const t of this.trails) {
+        if (t.kind !== kind) continue;
+        const el = time - t.time;
+        const tx = l.ox + t.x * k;
+        if (t.kind === TrailKind.HyperDashAfterImage) {
+          // MoveToOffset((0, -10), 1200, In); ScaleTo(Scale * 0.95).ScaleTo(Scale * 1.2, 1200, In); FadeOut(1200)
+          const p = Math.min(1, el / 1200);
+          const s = 0.95 + (1.2 - 0.95) * inQuad(p);
+          if (legacyCatcher)
+            legacyCatcher.drawCatcher(
+              g,
+              tx,
+              plateY - 10 * inQuad(p) * k,
+              k,
+              catcherScale * s,
+              t.direction ?? 1,
+              t.state ?? 'idle',
+              0,
+              this.hyperDashAfterImageColour,
+              1 - p,
+              true,
+            );
+          else drawCatcherPlate(g, tx, plateY - 10 * inQuad(p) * k, catcherWidthPx * s, catcherScale * k * s, this.hyperDashAfterImageColour, 1 - p);
+        } else {
+          // FadeTo(0.4f).FadeOut(800, OutQuint)
+          const alpha = 0.4 * (1 - outQuint(el / 800));
+          const colour = t.kind === TrailKind.HyperDashing ? this.hyperDashColour : WHITE;
+          if (legacyCatcher) legacyCatcher.drawCatcher(g, tx, plateY, k, catcherScale, t.direction ?? 1, t.state ?? 'idle', 0, colour, alpha, true);
+          else drawCatcherPlate(g, tx, plateY, catcherWidthPx, catcherScale * k, colour, alpha);
+        }
       }
     }
     g.globalCompositeOperation = 'source-over';
-
-    for (const e of this.explosions) {
-      const unit = e.objectScale * catcherScale * k;
-      drawHitExplosion(g, catcherX + e.x * catcherScale * k, plateY, unit, e.colour, time - e.time, e.tall, e.comboScale);
-    }
 
     g.restore();
 
@@ -819,7 +899,19 @@ export class DrawableCatchRuleset implements DrawableRuleset {
     }
   }
 
-  private drawEntry(g: CanvasRenderingContext2D, e: PalpableEntry, x: number, y: number, radius: number, rotation: number, alpha: number, age: number, time: number): void {
+  private drawEntry(
+    g: CanvasRenderingContext2D,
+    e: PalpableEntry,
+    x: number,
+    y: number,
+    radius: number,
+    rotation: number,
+    alpha: number,
+    age: number,
+    time: number,
+    tint: RGB | null = null,
+    caught = false,
+  ): void {
     const L = this.legacy;
     if (L) {
       const kind = e.kind === PieceKind.Fruit ? 'fruit' : e.kind === PieceKind.Banana ? 'banana' : 'droplet';
@@ -837,6 +929,7 @@ export class DrawableCatchRuleset implements DrawableRuleset {
     p.hyper = e.obj.hyperDash;
     p.alpha = alpha;
     p.seed = e.seed;
+    p.tint = tint ?? WHITE;
 
     switch (e.kind) {
       case PieceKind.Fruit:
@@ -852,12 +945,14 @@ export class DrawableCatchRuleset implements DrawableRuleset {
         break;
       }
       case PieceKind.Banana: {
-        // ArgonBananaPiece lens flare: fades out between 30% and 80% of the time on screen.
+        // ArgonFruitPiece layer rotation, plus the ArgonBananaPiece lens flare: fades out between 30% and 80% of the
+        // time on screen. Caught objects have DisplayStartTime == StartTime, so their flare is hidden.
+        p.layerRotation = age * 0.02 * e.layerSpeed;
         const duration = e.obj.startTime - e.lifetimeStart;
         const start = e.lifetimeStart + duration * 0.3;
         const end = e.lifetimeStart + duration * 0.8;
         const flare = time <= start ? 1 : 1 - outQuint((time - start) / (end - start));
-        drawBanana(g, p, e.state === JudgeState.Pending ? flare : 0);
+        drawBanana(g, p, caught ? 0 : flare, (radius * 2) / (OBJECT_RADIUS * 2 * l2(this.layout)));
         break;
       }
     }
@@ -928,6 +1023,12 @@ export class DrawableCatchRuleset implements DrawableRuleset {
 }
 
 const WHITE: RGB = [255, 255, 255];
+
+/** CatcherTrailDisplay children order: dashTrails, hyperDashTrails, hyperDashAfterImages. */
+const TRAIL_ORDER = [TrailKind.Dashing, TrailKind.HyperDashing, TrailKind.HyperDashAfterImage] as const;
+
+/** Playfield units -> px of a layout (1 before the first render). */
+const l2 = (l: Layout | null): number => (l ? l.k : 1);
 
 /** CatchTouchInputMapper: width of the touch columns (relative) and the ratio of the normal (non-dash) area. */
 const TOUCH_ZONE_WIDTH = 0.15;

@@ -1,23 +1,32 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// Results screen (port of the essentials of ResultsScreen / statistics panel).
+// Port of osu.Game/Screens/Ranking/ResultsScreen.cs + SoloResultsScreen.cs (lazer's default results screen; the
+// skinnable Screens/RankingV2 one isn't used by default). The leaderboard shown beside the new score is the local one
+// (stored scores for this beatmap + ruleset), as SoloResultsScreen shows for the local scope.
 
 import { settings } from '../../framework/Settings';
 import type { WorkingBeatmap } from '../../game/beatmaps/WorkingBeatmap';
 import type { ModSet } from '../../game/mods/Mods';
-import { calculateOsuDifficulty, calculateOsuPerformance } from '../../game/rulesets/osu/difficulty';
+import { calculateOsuDifficulty, calculateOsuPerformance, calculateOsuPerformanceAttributes } from '../../game/rulesets/osu/difficulty';
+import type { OsuDifficultyAttributes } from '../../game/rulesets/osu/difficulty';
 import type { OsuPlayableBeatmap } from '../../game/rulesets/osu/beatmap';
 import type { PlayableBeatmap, Ruleset } from '../../game/rulesets/Ruleset';
-import { HitResult, isBasic, isHit } from '../../game/scoring/HitResult';
+import { HitResult } from '../../game/scoring/HitResult';
 import type { HitEvent } from '../../game/scoring/ScoreProcessor';
-import { RANK_COLOURS, RANK_DISPLAY, type ScoreRank } from '../../game/scoring/ScoreRank';
+import type { ScoreRank } from '../../game/scoring/ScoreRank';
 import { Database } from '../../game/storage/Database';
-import { formatNumber, h } from '../dom';
+import { h } from '../dom';
 import type { Game } from '../Game';
 import { Screen } from '../Screen';
 import type { Replay } from '../../game/replays/Replay';
 import { encodeOsr, replayToLegacyFrames } from '../../game/replays/LegacyReplay';
 import { md5 } from '../../game/replays/md5';
 import { findFile } from '../../game/storage/Importer';
+import { icon } from '../menu/icons';
+import { PanelState, type PanelContext } from '../ranking/ScorePanel';
+import { ScorePanelList } from '../ranking/ScorePanelList';
+import { scoreViewFromRecord, type ScoreView } from '../ranking/ScoreView';
+import { StatisticsPanel, type PerformanceBreakdown, type StatisticsContext } from '../ranking/StatisticsPanel';
+import '../ranking/ranking.css';
 
 export interface PlayResult {
   working: WorkingBeatmap;
@@ -40,49 +49,188 @@ export interface PlayResult {
   isReplay?: boolean;
 }
 
+type PerfScore = Parameters<typeof calculateOsuPerformance>[1];
+
+function perfScore(statistics: ReadonlyMap<HitResult, number>, maxCombo: number, accuracy: number): PerfScore {
+  const s = (r: HitResult) => statistics.get(r) ?? 0;
+  return {
+    count300: s(HitResult.Great),
+    count100: s(HitResult.Ok),
+    count50: s(HitResult.Meh),
+    countMiss: s(HitResult.Miss),
+    maxCombo,
+    accuracy,
+    sliderTailHits: s(HitResult.SliderTailHit),
+    largeTickMisses: s(HitResult.LargeTickMiss),
+  } as PerfScore;
+}
+
 /** Performance points (only implemented for osu! standard). */
 export function computePp(r: PlayResult): number | undefined {
   if (r.ruleset.id !== 0) return undefined;
   try {
     const attributes = calculateOsuDifficulty(r.playable as OsuPlayableBeatmap);
-    const s = r.statistics;
-    return calculateOsuPerformance(
-      attributes,
-      {
-        count300: s.get(HitResult.Great) ?? 0,
-        count100: s.get(HitResult.Ok) ?? 0,
-        count50: s.get(HitResult.Meh) ?? 0,
-        countMiss: s.get(HitResult.Miss) ?? 0,
-        maxCombo: r.maxCombo,
-        accuracy: r.accuracy,
-        sliderTailHits: s.get(HitResult.SliderTailHit) ?? 0,
-        largeTickMisses: s.get(HitResult.LargeTickMiss) ?? 0,
-      } as Parameters<typeof calculateOsuPerformance>[1],
-      r.mods,
-    );
+    return calculateOsuPerformance(attributes, perfScore(r.statistics, r.maxCombo, r.accuracy), r.mods);
   } catch {
     return undefined;
   }
 }
 
+/** TwoLayerButton.SIZE_EXTENDED.Y (the bottom panel height). */
+const BOTTOM_PANEL_HEIGHT = 50;
+const SCREEN_HEIGHT = 768 - BOTTOM_PANEL_HEIGHT;
+const BACKGROUND_BLUR = 10;
+const HOLD_TO_RETRY = 200;
+
 export class ResultsScreen extends Screen {
+  private readonly current: ScoreView;
+  private readonly list: ScorePanelList;
+  private readonly statistics: StatisticsPanel;
+  private readonly scrollEl: HTMLDivElement;
+  private readonly contentEl: HTMLDivElement;
+  private readonly bottomPanel: HTMLDivElement;
+  private readonly replayButton: HTMLButtonElement;
+  private selected: ScoreView;
+  private raf = 0;
+  private enteredAt = 0;
+  private retryHeldSince: number | null = null;
+  private readonly difficultyCache = new Map<string, Promise<{ playable: PlayableBeatmap; attributes?: OsuDifficultyAttributes } | null>>();
+
   constructor(
     game: Game,
     private readonly result: PlayResult,
   ) {
     super(game, 'results');
-    this.backgroundDim = 0.75;
-    this.build();
+    this.backgroundDim = 0.5;
+    this.showTriangles = false;
+    const r = result;
+    this.current = {
+      key: 'current',
+      working: r.working,
+      ruleset: r.ruleset,
+      mods: r.mods,
+      totalScore: r.totalScore,
+      accuracy: r.accuracy,
+      maxCombo: r.maxCombo,
+      maximumCombo: r.maximumCombo,
+      rank: r.passed ? r.rank : 'F',
+      statistics: r.statistics,
+      maximumStatistics: r.maximumStatistics,
+      hitEvents: r.hitEvents,
+      date: r.date,
+      player: r.replay?.player ?? settings.get('ui.username', 'Guest'),
+      pp: computePp(r),
+      replay: r.replay ?? null,
+      hasReplay: !!r.replay && r.replay.events.length > 0,
+      isNewLocalScore: true,
+    };
+    this.selected = this.current;
+
+    const playSample = (name: string, volume: number, rate = 1) => {
+      const audio = this.game.audio;
+      const b = audio?.getDefaultSample(name);
+      if (audio && b) audio.play(b, { volume, rate });
+    };
+    const panelCtx: PanelContext = {
+      playSample,
+      playApplause: () => undefined, // Results/applause-* samples have no synthesised stand-in.
+      starRating: s => this.starRating(s),
+      performance: s => this.performance(s),
+      isRanked: s => s.mods.isRanked,
+    };
+    const statsCtx: StatisticsContext = {
+      breakdown: s => this.breakdown(s),
+      replayButton: s => (this.canWatch(s) ? this.createReplayButton(s, 1.5) : null),
+    };
+
+    this.statistics = new StatisticsPanel(statsCtx, (n, v) => playSample(n, v));
+    this.statistics.onToggle = () => this.toggleStatistics();
+    this.list = new ScorePanelList(panelCtx);
+    this.list.postExpandAction = () => this.toggleStatistics();
+    this.list.onSelectedChanged = s => {
+      this.selected = s;
+      this.statistics.setScore(s, performance.now());
+      this.updateReplayButton();
+    };
+
+    this.contentEl = h('div', { class: 'results-content' }, this.statistics.el, this.list.el);
+    this.scrollEl = h('div', { class: 'results-scroll' }, this.contentEl);
+
+    this.replayButton = this.createReplayButton(null, 1);
+    this.replayButton.classList.add('wide');
+    const buttons = h(
+      'div',
+      { class: 'results-buttons' },
+      this.replayButton,
+      h('button', { class: 'animated-button green wide', title: r.isReplay ? 'replay' : 'retry', onclick: () => void this.retry() }, icon('redo', 'animated-button-icon')),
+      // Downloads are blocked inside the artifact viewer, so the .osr export is only offered on the full site.
+      r.replay && r.replay.events.length > 0 && r.ruleset.id !== 2 && import.meta.env.VITE_TARGET !== 'artifact'
+        ? h('button', { class: 'animated-button', title: 'Export .osr', onclick: () => void this.exportOsr() }, icon('export', 'animated-button-icon'))
+        : null,
+    );
+    this.bottomPanel = h('div', { class: 'results-bottom' }, buttons);
+    const back = h('button', { class: 'results-back', onclick: () => this.game.back() }, h('span', { class: 'results-back-icon' }, '‹'), h('span', null, 'back'));
+    this.el.append(this.scrollEl, this.bottomPanel, back);
+    if (!r.mods.isRanked && !r.isReplay) this.el.appendChild(h('div', { class: 'results-unranked-note' }, 'Score not saved (unranked mods)'));
+
+    // ScorePanelList.AddScore(Score, shouldFlair): flair only when arriving from a play that isn't autoplay.
+    const panel = this.list.addScore(this.current, !r.mods.isAutoplay);
+    this.list.select(panel);
+    this.statistics.setScore(this.current, performance.now());
+    this.updateReplayButton();
   }
 
   onEnter(): void {
-    this.game.setBackgroundDim(0.75, 8);
+    const t = performance.now();
+    this.enteredAt = t;
+    // ApplyToBackground: BlurAmount = BACKGROUND_BLUR, FadeColour(Gray(0.5), 250).
+    this.game.setBackgroundDim(0.5, BACKGROUND_BLUR);
     void this.game.startPreview();
-    void this.save();
+    this.game.playUiSample('menu-confirm', 0.3); // UI/overlay-pop-in
+    void this.fetchAndSave();
+    const loop = () => {
+      this.raf = requestAnimationFrame(loop);
+      this.update(performance.now());
+    };
+    this.raf = requestAnimationFrame(loop);
   }
 
   onExit(): void {
+    cancelAnimationFrame(this.raf);
     this.game.setBackgroundDim(0.6, 0);
+  }
+
+  private update(now: number): void {
+    const fit = Math.max(SCREEN_HEIGHT, this.scrollEl.clientHeight);
+    this.contentEl.style.height = `${fit}px`;
+    // bottomPanel.FadeTo(1, 250)
+    this.bottomPanel.style.opacity = String(Math.min(1, (now - this.enteredAt) / 250));
+    this.list.update(now);
+    this.statistics.update(now);
+    if (this.retryHeldSince != null && now - this.retryHeldSince >= HOLD_TO_RETRY) {
+      this.retryHeldSince = null;
+      void this.retry();
+    }
+  }
+
+  // ---------------------------------------------------------------- scores
+
+  private async fetchAndSave(): Promise<void> {
+    const r = this.result;
+    // SoloResultsScreen.FetchScores (local scope): the other stored scores of this beatmap in this ruleset.
+    try {
+      const records = (await Database.getScores(r.working.entry.hash)).filter(s => s.rulesetId === r.ruleset.id && !(s.date === r.date && s.totalScore === r.totalScore));
+      const views = records.map(rec => scoreViewFromRecord(rec, r.working, r.ruleset, r.maximumStatistics, r.maximumCombo));
+      const all = [...views, this.current].sort((a, b) => b.totalScore - a.totalScore);
+      all.forEach((s, i) => (s.position = i + 1));
+      for (const v of views.slice(0, 50)) this.list.addScore(v);
+      const panel = this.list.panels.find(p => p.score === this.current);
+      if (panel) panel.position = this.current.position;
+      if (this.list.selected) this.list.select(this.list.selected);
+    } catch {
+      /* storage unavailable */
+    }
+    await this.save();
   }
 
   private async save(): Promise<void> {
@@ -104,77 +252,116 @@ export class ResultsScreen extends Screen {
         player: settings.get('ui.username', 'Guest'),
         hasReplay: !!r.replay,
       });
+      this.current.recordId = id;
       if (r.replay) await Database.putReplay(id, r.replay);
     } catch {
       /* storage unavailable */
     }
   }
 
-  private build(): void {
-    const r = this.result;
-    const e = r.working.entry;
-    const pp = computePp(r);
-    const rankColour = RANK_COLOURS[r.rank];
-
-    const counts = r.ruleset.displayedResults
-      .filter(res => (r.maximumStatistics.get(res) ?? 0) > 0 || (r.statistics.get(res) ?? 0) > 0 || isBasic(res))
-      .map(res => {
-        const max = r.maximumStatistics.get(res) ?? 0;
-        const value = r.statistics.get(res) ?? 0;
-        const showMax = !isBasic(res) && max > 0;
-        return stat(r.ruleset.resultLabel(res), showMax ? `${value}/${max}` : String(value));
-      });
-
-    // Timing statistics (HitEventExtensions.CalculateUnstableRate / CalculateAverageHitError)
-    const timed = r.hitEvents.filter(ev => isBasic(ev.result) && isHit(ev.result));
-    const offsets = timed.map(ev => ev.timeOffset / (ev.gameplayRate || 1));
-    const mean = offsets.length ? offsets.reduce((a, b) => a + b, 0) / offsets.length : 0;
-    const ur = offsets.length > 1 ? Math.sqrt(offsets.reduce((a, b) => a + (b - mean) ** 2, 0) / offsets.length) * 10 : 0;
-
-    const graph = h('canvas', { class: 'hit-graph' });
-
-    const card = h(
-      'div',
-      { class: 'panel results-card' },
-      h('div', null, h('div', { class: 'results-rank', style: { color: rankColour } }, r.passed ? RANK_DISPLAY[r.rank] : 'F')),
-      h(
-        'div',
-        null,
-        h('div', { class: 'ss-title' }, e.title),
-        h('div', { class: 'ss-artist' }, `${e.artist} · [${e.difficultyName}] · ${r.ruleset.name}`),
-        h('div', { class: 'results-score' }, formatNumber(r.totalScore)),
-        r.mods.isEmpty ? null : h('div', { class: 'mod-pills' }, r.mods.list.map(m => h('span', { class: 'mod-pill', style: { background: '#ffcc22' } }, r.mods.label(m)))),
-        h(
-          'div',
-          { class: 'results-stats' },
-          stat('Accuracy', `${(r.accuracy * 100).toFixed(2)}%`),
-          stat('Max combo', `${r.maxCombo}x / ${r.maximumCombo}x`),
-          pp !== undefined ? stat('Performance', `${Math.round(pp)}pp`) : null,
-          ...counts,
-          offsets.length > 1 ? stat('Unstable rate', ur.toFixed(2)) : null,
-          offsets.length > 0 ? stat('Avg. hit error', `${mean >= 0 ? '+' : ''}${mean.toFixed(1)}ms`) : null,
-        ),
-        offsets.length > 0 ? graph : null,
-        h(
-          'div',
-          { class: 'results-actions' },
-          h('button', { class: 'btn primary', onclick: () => this.retry() }, 'Retry'),
-          h('button', { class: 'btn', onclick: () => this.game.back() }, 'Back to song select'),
-          r.replay && r.replay.events.length > 0 ? h('button', { class: 'btn', onclick: () => this.watchReplay() }, 'Watch replay') : null,
-          // Downloads are blocked inside the artifact viewer, so the .osr export is only offered on the full site.
-          r.replay && r.replay.events.length > 0 && r.ruleset.id !== 2 && import.meta.env.VITE_TARGET !== 'artifact' ? h('button', { class: 'btn ghost', onclick: () => void this.exportOsr() }, 'Export .osr') : null,
-          !r.mods.isRanked ? h('span', { style: { color: 'var(--fg-dim)', alignSelf: 'center', fontSize: '13px' } }, 'Score not saved (unranked mods)') : null,
-        ),
-      ),
-    );
-    this.el.appendChild(card);
-    requestAnimationFrame(() => drawHitGraph(graph, offsets));
+  /** The playable beatmap (and osu! difficulty attributes) for a score's mods. */
+  private difficulty(score: ScoreView): Promise<{ playable: PlayableBeatmap; attributes?: OsuDifficultyAttributes } | null> {
+    const key = score.mods.toString();
+    let p = this.difficultyCache.get(key);
+    if (!p) {
+      p = (async () => {
+        try {
+          const playable = key === this.result.mods.toString() ? this.result.playable : score.ruleset.createPlayable(await score.working.getBeatmap(), score.mods);
+          const attributes = score.ruleset.id === 0 ? calculateOsuDifficulty(playable as OsuPlayableBeatmap) : undefined;
+          return { playable, attributes };
+        } catch {
+          return null;
+        }
+      })();
+      this.difficultyCache.set(key, p);
+    }
+    return p;
   }
 
-  private async watchReplay(): Promise<void> {
+  private async starRating(score: ScoreView): Promise<number | undefined> {
+    const d = await this.difficulty(score);
+    if (!d) return undefined;
+    if (d.attributes) return d.attributes.starRating;
+    try {
+      return score.ruleset.starRating?.(d.playable);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async performance(score: ScoreView): Promise<number | undefined> {
+    if (score.pp !== undefined) return score.pp;
+    const d = await this.difficulty(score);
+    if (!d?.attributes) return undefined;
+    return calculateOsuPerformance(d.attributes, perfScore(score.statistics, score.maxCombo, score.accuracy), score.mods);
+  }
+
+  /** PerformanceBreakdownChart.computePerformance: the score's performance and a perfect score's (BeatmapDifficultyCache). */
+  private async breakdown(score: ScoreView): Promise<PerformanceBreakdown | undefined> {
+    const d = await this.difficulty(score);
+    if (!d?.attributes) return undefined;
+    const achieved = calculateOsuPerformanceAttributes(d.attributes, perfScore(score.statistics, score.maxCombo, score.accuracy), score.mods);
+    const perfect = calculateOsuPerformanceAttributes(d.attributes, perfScore(score.maximumStatistics, d.attributes.maxCombo, 1), score.mods);
+    return {
+      total: achieved.total,
+      perfectTotal: perfect.total,
+      attributes: [
+        ['Aim', achieved.aim, perfect.aim],
+        ['Speed', achieved.speed, perfect.speed],
+        ['Accuracy', achieved.accuracy, perfect.accuracy],
+        ['Flashlight Bonus', achieved.flashlight, perfect.flashlight],
+        ['Reading', achieved.reading, perfect.reading],
+      ],
+    };
+  }
+
+  // ---------------------------------------------------------------- statistics
+
+  private toggleStatistics(): void {
+    const t = performance.now();
+    this.statistics.toggle(t);
+    this.list.setStatisticsVisible(this.statistics.isVisible, t);
+    // Dim background: Gray(0.4) while shown, Gray(0.5) otherwise.
+    this.game.setBackgroundDim(this.statistics.isVisible ? 0.6 : 0.5, BACKGROUND_BLUR);
+  }
+
+  // ---------------------------------------------------------------- replay / retry
+
+  private canWatch(s: ScoreView): boolean {
+    return s.hasReplay && (!!s.replay || s.recordId != null);
+  }
+
+  /** ReplayDownloadButton (locally available → green with a check; otherwise disabled). */
+  private createReplayButton(score: ScoreView | null, scale: number): HTMLButtonElement {
+    const b = h(
+      'button',
+      { class: 'animated-button replay-button', onclick: (e: Event) => (e.stopPropagation(), void this.watchReplay(score ?? this.selected)) },
+      h('span', { class: 'replay-icons' }, icon('download', 'animated-button-icon'), icon('check', 'animated-button-icon check')),
+    );
+    if (scale !== 1) b.style.transform = `scale(${scale})`;
+    if (score) this.setReplayButtonState(b, score);
+    return b;
+  }
+
+  private setReplayButtonState(b: HTMLButtonElement, s: ScoreView): void {
+    const local = this.canWatch(s);
+    b.classList.toggle('green', local);
+    b.classList.toggle('available', local);
+    b.disabled = !local;
+    b.title = local ? 'watch replay' : 'replay unavailable';
+  }
+
+  private updateReplayButton(): void {
+    this.setReplayButtonState(this.replayButton, this.selected);
+  }
+
+  private async watchReplay(s: ScoreView): Promise<void> {
+    if (!this.canWatch(s)) return;
+    let replay = s.replay ?? null;
+    if (!replay && s.recordId != null) replay = (await Database.getReplay(s.recordId).catch(() => undefined)) ?? null;
+    if (!replay) return;
     const { PlayerScreen } = await import('./Player');
-    const r = this.result;
-    this.game.replace(new PlayerScreen(this.game, r.working, r.ruleset, r.mods, r.replay ?? null));
+    this.game.replace(new PlayerScreen(this.game, s.working, s.ruleset, s.mods, replay));
   }
 
   /** Exports the replay in osu!stable's .osr format (LegacyScoreEncoder) so it can be opened in osu! / lazer. */
@@ -220,56 +407,56 @@ export class ResultsScreen extends Screen {
     }
   }
 
+  /** RetryButton / HotkeyRetryOverlay: Player.Restart (a replay restarts the replay). */
   private async retry(): Promise<void> {
+    const r = this.result;
     const { PlayerScreen } = await import('./Player');
-    this.game.replace(new PlayerScreen(this.game, this.result.working, this.result.ruleset, this.result.mods));
+    if (r.isReplay && r.replay) this.game.replace(new PlayerScreen(this.game, r.working, r.ruleset, r.mods, r.replay));
+    else this.game.replace(new PlayerScreen(this.game, r.working, r.ruleset, r.mods));
   }
 
+  // ---------------------------------------------------------------- input
+
   onKeyDown(e: KeyboardEvent): boolean {
-    if (e.code === 'Backquote' || (e.code === 'KeyR' && e.ctrlKey)) {
+    if (e.code === 'Backquote' && !e.repeat) {
+      this.retryHeldSince = performance.now();
+      return true;
+    }
+    if (e.code === 'KeyR' && e.ctrlKey) {
       void this.retry();
       return true;
     }
-    if (e.code === 'Enter') {
-      this.game.back();
+    if (e.repeat) return false;
+    switch (e.code) {
+      case 'Enter':
+      case 'NumpadEnter':
+        // GlobalAction.Select toggles the statistics of the selected score.
+        if (this.list.selected?.state === PanelState.Expanded) this.toggleStatistics();
+        return true;
+      case 'ArrowLeft':
+        if (!this.statistics.isVisible) this.list.selectPrevious();
+        return true;
+      case 'ArrowRight':
+        if (!this.statistics.isVisible) this.list.selectNext();
+        return true;
+    }
+    return false;
+  }
+
+  onKeyUp(e: KeyboardEvent): boolean {
+    if (e.code === 'Backquote') {
+      this.retryHeldSince = null;
       return true;
     }
     return false;
   }
-}
 
-function stat(label: string, value: string): HTMLElement {
-  return h('div', { class: 'stat' }, h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, value));
-}
-
-/** Hit offset distribution histogram (HitEventTimingDistributionGraph). */
-function drawHitGraph(canvas: HTMLCanvasElement, offsets: number[]): void {
-  const dpr = window.devicePixelRatio || 1;
-  const w = canvas.clientWidth;
-  const hgt = canvas.clientHeight;
-  if (!w || !hgt || offsets.length === 0) return;
-  canvas.width = w * dpr;
-  canvas.height = hgt * dpr;
-  const g = canvas.getContext('2d')!;
-  g.scale(dpr, dpr);
-  const range = Math.max(20, ...offsets.map(o => Math.abs(o)));
-  const bins = 51;
-  const counts = new Array(bins).fill(0);
-  for (const o of offsets) counts[Math.min(bins - 1, Math.max(0, Math.round(((o + range) / (2 * range)) * (bins - 1))))]++;
-  const max = Math.max(...counts);
-  const bw = w / bins;
-  for (let i = 0; i < bins; i++) {
-    const bh = (counts[i] / max) * (hgt - 16);
-    const d = Math.abs(i - (bins - 1) / 2) / ((bins - 1) / 2);
-    g.fillStyle = d < 0.33 ? '#66ccff' : d < 0.66 ? '#b3d944' : '#ffcc22';
-    g.fillRect(i * bw + 1, hgt - 14 - bh, bw - 2, Math.max(1, bh));
+  /** OnBackButton: hide the statistics first. */
+  onBack(): boolean {
+    if (this.statistics.isVisible) {
+      this.toggleStatistics();
+      return false;
+    }
+    return true;
   }
-  g.fillStyle = 'rgba(255,255,255,0.6)';
-  g.font = '11px "Exo 2", sans-serif';
-  g.textAlign = 'left';
-  g.fillText(`-${Math.round(range)}ms (early)`, 0, hgt - 1);
-  g.textAlign = 'right';
-  g.fillText(`+${Math.round(range)}ms (late)`, w, hgt - 1);
-  g.textAlign = 'center';
-  g.fillText('0', w / 2, hgt - 1);
 }

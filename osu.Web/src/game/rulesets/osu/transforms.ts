@@ -68,6 +68,11 @@ export class Prop {
     return this.initial;
   }
 
+  /** The value once every transform has finished (FinishTransforms). */
+  get finalValue(): number {
+    return this.ts.length > 0 ? this.ts[this.ts.length - 1].to : this.initial;
+  }
+
   /** LatestTransformEndTime */
   get endTime(): number {
     let e = -Infinity;

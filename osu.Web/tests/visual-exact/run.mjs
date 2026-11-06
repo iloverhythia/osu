@@ -15,7 +15,14 @@ const browser = await playwright.chromium.launch();
 const page = await browser.newPage({ viewport: { width: w, height: h } });
 page.on('console', m => m.type() === 'error' && console.log('console:', m.text()));
 page.on('pageerror', e => console.log('pageerror:', e.message));
-const q = new URLSearchParams({ ruleset, mods, w: String(w), h: String(h), settings, ...(map ? { map } : {}) });
+const q = new URLSearchParams({
+  ruleset,
+  mods,
+  w: String(w),
+  h: String(h),
+  settings,
+  ...(map ? { map } : {}),
+});
 await page.goto(`http://localhost:5324/tests/visual-exact/harness.html?${q}`);
 await page.waitForSelector('body[data-ready]', { timeout: 30000 });
 const objectTimes = await page.evaluate(() => window.harness.objectTimes);

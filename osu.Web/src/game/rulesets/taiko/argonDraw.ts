@@ -58,7 +58,17 @@ function glyphPath(g: Glyph): Path2D | null {
  * SpriteIcon: the glyph is fitted (preserving its aspect ratio) into a `size` x `size` box centred at (cx, cy),
  * then scaled by (scaleX, scaleY) and rotated (degrees) around the centre. Uses the current fillStyle / globalAlpha.
  */
-export function drawIcon(ctx: CanvasRenderingContext2D, g: Glyph, cx: number, cy: number, size: number, scaleX = 1, scaleY = 1, rotation = 0, boxH = size): void {
+export function drawIcon(
+  ctx: CanvasRenderingContext2D,
+  g: Glyph,
+  cx: number,
+  cy: number,
+  size: number,
+  scaleX = 1,
+  scaleY = 1,
+  rotation = 0,
+  boxH = size,
+): void {
   const p = glyphPath(g);
   if (!p || size <= 0) return;
   const fit = Math.min(size / g.w, boxH / g.h);
@@ -123,7 +133,17 @@ export function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: numbe
  * EdgeEffectType.Glow around a rounded rectangle (corner radius `cr`): approximated with concentric rounded-rect strokes
  * following the masking shader's falloff ((1 - d / radius)^2).
  */
-export function drawRoundRectGlow(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, cr: number, radius: number, colour: RGB, alpha: number): void {
+export function drawRoundRectGlow(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  cr: number,
+  radius: number,
+  colour: RGB,
+  alpha: number,
+): void {
   if (alpha <= 0.001 || radius <= 0) return;
   const steps = Math.max(4, Math.min(16, Math.ceil(radius / 2)));
   const step = radius / steps;

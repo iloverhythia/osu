@@ -2,11 +2,14 @@
 // Gameplay + rendering for osu!mania. Ports the judgement logic of
 // osu.Game.Rulesets.Mania/Objects/Drawables/{DrawableNote,DrawableHoldNote,DrawableHoldNoteHead,DrawableHoldNoteTail,DrawableHoldNoteBody}.cs,
 // Judgements/HoldNoteJudgementResult.cs, UI/{Column,Stage,OrderedHitPolicy,DrawableManiaRuleset,PlayfieldCoveringWrapper}.cs,
-// GameplaySampleTriggerSource.cs, ManiaModHidden/FadeIn/Flashlight, and draws an argon-like skin procedurally.
+// GameplaySampleTriggerSource.cs, ManiaModHidden/FadeIn/Flashlight, and draws the default (Argon) skin procedurally:
+// osu.Game.Rulesets.Mania/Skinning/Argon/{ArgonNotePiece,ArgonHoldNoteHeadPiece,ArgonHoldNoteTailPiece,ArgonHoldBodyPiece,
+// ArgonHoldNoteHittingLayer,ArgonColumnBackground,ArgonHitTarget,ArgonKeyArea,ArgonHitExplosion,ArgonJudgementPiece,
+// ArgonManiaComboCounter,ArgonStageBackground}.cs, Skinning/Default/DefaultBarLine.cs, Objects/Drawables/DrawableBarLine.cs,
+// with the layer order of UI/Stage.cs, UI/Column.cs and UI/Components/ColumnHitObjectArea.cs.
 
 import { ManiaLegacySkinRenderer, type ManiaLegacyColumn } from './legacySkin';
 import { generateBarLines, type BarLine } from '../../../objects/BarLineGenerator';
-import { COLOURS } from '../../../Skin';
 import { HitResult, isHit } from '../../../scoring/HitResult';
 import type { JudgementResult } from '../../../scoring/Judgement';
 import type { DrawableRuleset, GameplayContext, LoopHandle } from '../../Ruleset';
@@ -17,6 +20,20 @@ import { HoldNote, TailNote, type HeadNote, type HoldNoteBody, type ManiaHitObje
 import { generateManiaAutoplay, type ManiaReplayFrame } from '../replays/ManiaAutoGenerator';
 import { columnColour, css, darkenC4, lightenC4, mixC4, type RGB } from './ManiaColours';
 import { computeScrollTime, MAX_TIME_RANGE, SequentialScroll } from './ScrollAlgorithm';
+import { Anim } from './Anim';
+import { Easing, applyEasing } from '../../../storyboard/Easing';
+import {
+  FA_ANGLE_DOWN,
+  drawCircleGlow,
+  drawIcon,
+  drawRoundRectGlow,
+  drawSpacedText,
+  fillCircle,
+  fillPillBorder,
+  roundRectPath,
+  seededRandom,
+} from '../../taiko/argonDraw';
+import { ArgonComboCounter, drawArgonText, measureArgonText } from '../../../../ui/hud/ArgonCounter';
 
 // ---- Layout constants (reference 1024x768 space, argon skin) ----
 const COLUMN_WIDTH = 60;
@@ -51,17 +68,22 @@ const JUDGEMENT_TEXT: Partial<Record<HitResult, string>> = {
   [HitResult.Miss]: 'MISS',
 };
 
-const JUDGEMENT_COLOUR: Partial<Record<HitResult, string>> = {
-  [HitResult.Perfect]: COLOURS.perfect,
-  [HitResult.Great]: COLOURS.great,
-  [HitResult.Good]: COLOURS.good,
-  [HitResult.Ok]: COLOURS.ok,
-  [HitResult.Meh]: COLOURS.meh,
-  [HitResult.Miss]: COLOURS.miss,
+/** OsuColour.ForHitResult */
+const JUDGEMENT_COLOUR: Partial<Record<HitResult, RGB>> = {
+  [HitResult.Perfect]: [0x99, 0xee, 0xff],
+  [HitResult.Great]: [0x66, 0xcc, 0xff],
+  [HitResult.Good]: [0xb3, 0xd9, 0x44],
+  [HitResult.Ok]: [0x88, 0xb3, 0x00],
+  [HitResult.Meh]: [0xff, 0xcc, 0x22],
+  [HitResult.Miss]: [0xed, 0x11, 0x21],
 };
+/** DefaultBarLine major_extension */
+const BAR_LINE_MAJOR_EXTENSION = 10;
+const WHITE: RGB = [255, 255, 255];
+/** Torus is substituted by the app font. */
+const FONT = '"Exo 2", system-ui, sans-serif';
 
-const easeOutQuint = (t: number): number => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 5);
-const easeInQuint = (t: number): number => Math.pow(Math.min(1, Math.max(0, t)), 5);
+const mul = (a: RGB, b: RGB): RGB => [(a[0] * b[0]) / 255, (a[1] * b[1]) / 255, (a[2] * b[2]) / 255];
 const clamp01 = (t: number): number => (t < 0 ? 0 : t > 1 ? 1 : t);
 
 // ---- Runtime judgement state ----
@@ -127,11 +149,19 @@ class DHold extends JudgeState {
   }
 
   /** DrawableHoldNoteBody.HasHoldBreak */
+  /** HoldNoteJudgementResult holding state reports, oldest first. */
+  get holdingStates(): readonly { time: number; holding: boolean }[] {
+    return this.holdingState;
+  }
+
   get hasHoldBreak(): boolean {
     return this.body.judged && !this.body.isHit;
   }
 
-  private getLastReport(currentTime: number): { time: number; holding: boolean } {
+  private getLastReport(currentTime: number): {
+    time: number;
+    holding: boolean;
+  } {
     // Note: lazer pops states newer than `currentTime` to support rewinding. Gameplay here never rewinds
     // (input times are clamped to the current time), so the lookup is non-destructive and safe to use while rendering.
     for (let i = this.holdingState.length - 1; i >= 0; i--) if (this.holdingState[i].time <= currentTime) return this.holdingState[i];
@@ -164,6 +194,58 @@ interface Explosion {
   time: number;
 }
 
+/** Transform state of a column's ArgonColumnBackground / ArgonKeyArea (on the game-wide clock). */
+class ColumnAnims {
+  readonly overlay = new Anim(0);
+  readonly keyBg = new Anim(0);
+  readonly keyFlash = new Anim(0);
+  readonly light = new Anim(0);
+  readonly lineGlowAlpha = new Anim(0);
+  readonly lineGlowRadius = new Anim(0);
+  readonly iconScale = new Anim(1);
+  readonly iconGlowAlpha = new Anim(0);
+  readonly dotGlowAlpha = new Anim(0);
+  readonly dotGlowRadius = new Anim(0);
+
+  /** ArgonColumnBackground.OnPressed + ArgonKeyArea.OnPressed */
+  press(t: number): void {
+    this.overlay.start(t, [
+      [1, 50, Easing.OutQuint],
+      [0.5, 250, Easing.OutQuint],
+    ]);
+    // lighting_fade_in_duration = 70
+    this.keyFlash.start(t, [[0, 200, Easing.OutQuint]], 1);
+    this.keyBg.start(t, [
+      [1, 70, Easing.OutQuint],
+      [0.8, 500],
+    ]);
+    this.light.start(t, [[1, 70, Easing.OutQuint]]);
+    this.lineGlowAlpha.start(t, [[0.4, 70, Easing.OutQuint]]);
+    this.lineGlowRadius.start(t, [[20, 70, Easing.OutQuint]]);
+    this.iconScale.start(t, [[0.9, 70, Easing.OutQuint]]);
+    this.iconGlowAlpha.start(t, [[0.1, 70, Easing.OutQuint]]);
+    this.dotGlowAlpha.start(t, [[0.2, 70, Easing.OutQuint]]);
+    this.dotGlowRadius.start(t, [[60, 70, Easing.OutQuint]]);
+  }
+
+  /** ArgonColumnBackground.OnReleased + ArgonKeyArea.OnReleased */
+  release(t: number): void {
+    this.overlay.start(t, [[0, 250, Easing.OutQuint]]);
+    // lighting_fade_out_duration = 800
+    this.keyBg.start(t, [
+      [0.3, 50, Easing.OutQuint],
+      [0, 800, Easing.OutQuint],
+    ]);
+    this.light.start(t, [[0, 800, Easing.OutQuint]]);
+    this.lineGlowAlpha.start(t, [[0, 800, Easing.OutQuint]]);
+    this.lineGlowRadius.start(t, [[25, 800, Easing.OutQuint]]);
+    this.iconScale.start(t, [[1, 200, Easing.OutQuint]]);
+    this.iconGlowAlpha.start(t, [[0, 800, Easing.OutQuint]]);
+    this.dotGlowAlpha.start(t, [[0, 800, Easing.OutQuint]]);
+    this.dotGlowRadius.start(t, [[30, 800, Easing.OutQuint]]);
+  }
+}
+
 interface ColumnState {
   index: number;
   objects: DObj[];
@@ -178,25 +260,20 @@ interface ColumnState {
   special: boolean;
   /** GameplaySampleTriggerSource.mostValidObject */
   mostValid: DObj | null;
-  explosion: Explosion | null;
+  /** PoolableHitExplosions alive in the column. */
+  explosions: Explosion[];
+  anim: ColumnAnims;
   // layout (reference units)
   x: number;
   width: number;
   stage: number;
 }
 
-interface NotePieceStyle {
-  shadow: CanvasGradient;
-  accent: CanvasGradient;
-  accentTop: number;
-  accentH: number;
-  tailFill: string;
-  tailHighlight: CanvasGradient;
-}
-
 interface JudgementDisplay {
   result: HitResult;
   time: number;
+  /** Seed for the RingExplosion's random directions / distances. */
+  seed: number;
 }
 
 interface Layout {
@@ -240,6 +317,10 @@ export class DrawableManiaRuleset implements DrawableRuleset {
   private layout: Layout | null = null;
   private layer: HTMLCanvasElement | null = null;
   private coverage = 0;
+  /** PlayfieldCoveringWrapper gradient.Alpha (damped towards 1 while Coverage > 0). */
+  private coverGradientAlpha = 0;
+  private readonly comboCounter = new ArgonComboCounter();
+  private lastCombo = 0;
   private flashlightSize = FLASHLIGHT_SIZE;
   private lastUpdateTime: number | null = null;
 
@@ -275,7 +356,8 @@ export class DrawableManiaRuleset implements DrawableRuleset {
           colour: columnColour(i, stageColumns),
           special: stageColumns % 2 === 1 && i === Math.trunc(stageColumns / 2),
           mostValid: null,
-          explosion: null,
+          explosions: [],
+          anim: new ColumnAnims(),
           x: 0,
           width: COLUMN_WIDTH,
           stage: stageIndex,
@@ -290,7 +372,12 @@ export class DrawableManiaRuleset implements DrawableRuleset {
       for (const stageColumns of playable.stages) {
         for (let i = 0; i < stageColumns; i++) {
           const c = this.columns[inStageStart + i];
-          this.legacyColumns.push({ index: c.index, inStage: i, stageColumns, special: c.special });
+          this.legacyColumns.push({
+            index: c.index,
+            inStage: i,
+            stageColumns,
+            special: c.special,
+          });
         }
         inStageStart += stageColumns;
       }
@@ -395,6 +482,7 @@ export class DrawableManiaRuleset implements DrawableRuleset {
     this.advanceTo(time);
     column.down = true;
     column.pressTime = time;
+    column.anim.press(this.realTime(time));
 
     // Earlier hitobjects handle input first; the first one that handles the press consumes it.
     const lookahead = time + 2000;
@@ -415,6 +503,7 @@ export class DrawableManiaRuleset implements DrawableRuleset {
     this.advanceTo(time);
     column.down = false;
     column.releaseTime = time;
+    column.anim.release(this.realTime(time));
 
     for (let i = column.firstActive; i < column.objects.length; i++) {
       const obj = column.objects[i];
@@ -546,12 +635,17 @@ export class DrawableManiaRuleset implements DrawableRuleset {
 
     // Stage.OnNewResult: judgement display (notes, heads and tails only).
     const displayResult = state instanceof DNote;
-    if (displayResult) this.stageJudgements[column.stage] = { result: type, time };
+    if (displayResult)
+      this.stageJudgements[column.stage] = {
+        result: type,
+        time,
+        seed: Math.round(time * 16) ^ (column.index * 7919),
+      };
 
     // Column.OnNewResult
     if (isHit(type)) {
       this.handleHit(column, obj.startTime, time);
-      if (displayResult) column.explosion = { time };
+      if (displayResult) column.explosions.push({ time });
     }
   }
 
@@ -630,6 +724,7 @@ export class DrawableManiaRuleset implements DrawableRuleset {
     this.advanceTo(time);
     this.updateSlidingSamples(time);
     this.updateMods(time, elapsed);
+    this.updateCombo(time);
     this.lastUpdateTime = time;
   }
 
@@ -699,7 +794,9 @@ export class DrawableManiaRuleset implements DrawableRuleset {
       if (holding && !hold.loops) {
         hold.loops = [];
         for (const s of hold.obj.createSlidingSamples()) {
-          const handle = this.ctx.startLoop(s, { pan: this.panFor(hold.obj.column) });
+          const handle = this.ctx.startLoop(s, {
+            pan: this.panFor(hold.obj.column),
+          });
           if (handle) hold.loops.push(handle);
         }
       } else if (!holding && hold.loops) {
@@ -724,8 +821,14 @@ export class DrawableManiaRuleset implements DrawableRuleset {
         ? 0
         : Math.min(HIDDEN_MAX_COVERAGE, HIDDEN_MIN_COVERAGE + this.ctx.combo * HIDDEN_COVERAGE_PER_COMBO) / REFERENCE_PLAYFIELD_HEIGHT;
       const lastUpdate = this.lastUpdateTime;
-      if (lastUpdate == null) this.coverage = target;
-      else this.coverage = target + (this.coverage - target) * Math.pow(0.5, dt / 25);
+      const targetAlpha = target > 0 ? 1 : 0;
+      if (lastUpdate == null) {
+        this.coverage = target;
+        this.coverGradientAlpha = targetAlpha;
+      } else {
+        this.coverage = target + (this.coverage - target) * Math.pow(0.5, dt / 25);
+        this.coverGradientAlpha = targetAlpha + (this.coverGradientAlpha - targetAlpha) * Math.pow(0.5, dt / 25);
+      }
     }
 
     if (mods.has('FL')) {
@@ -798,7 +901,19 @@ export class DrawableManiaRuleset implements DrawableRuleset {
     const scrollLength = Math.max(1, bottom - top - hitPosition);
     const hitY = this.upwards ? top + hitPosition : bottom - hitPosition;
 
-    return { width, height, scale, W, H, stageLeft, stageWidth: stageWidths, hitY, scrollLength, top, bottom };
+    return {
+      width,
+      height,
+      scale,
+      W,
+      H,
+      stageLeft,
+      stageWidth: stageWidths,
+      hitY,
+      scrollLength,
+      top,
+      bottom,
+    };
   }
 
   /** Distance (reference units) from the hit position towards the scroll origin of an object at `time`. */
@@ -820,7 +935,7 @@ export class DrawableManiaRuleset implements DrawableRuleset {
     ctx.scale(l.scale, l.scale);
 
     this.drawColumnBackgrounds(ctx, l, time);
-    this.drawBarLines(ctx, l, currentRel);
+    this.drawBarLines(ctx, l, currentRel, time);
 
     const covered = this.ctx.mods.has('HD') || this.ctx.mods.has('FI');
     let target = ctx;
@@ -847,10 +962,11 @@ export class DrawableManiaRuleset implements DrawableRuleset {
       ctx.restore();
     }
 
-    this.drawKeyAreas(ctx, l, time);
-    this.drawExplosions(ctx, l, time);
+    // Stage: judgements, then the top level container (key areas + hit explosions of each column).
     this.drawJudgements(ctx, l, time);
-    this.drawCombo(ctx, l);
+    this.drawColumnTopLevel(ctx, l, time);
+    // HUD: ArgonManiaComboCounter (drawn by the playfield here)
+    this.drawCombo(ctx, l, time);
 
     if (this.ctx.mods.has('FL')) this.drawFlashlight(ctx, l);
 
@@ -870,41 +986,62 @@ export class DrawableManiaRuleset implements DrawableRuleset {
     return this.layer.getContext('2d');
   }
 
+  /** Column backgrounds and key areas use the game-wide clock (ApplyGameWideClock), which is not rate adjusted. */
+  private realTime(time: number): number {
+    return time / Math.max(0.01, Math.abs(this.ctx.rate));
+  }
+
   private stageVerticalExtent(l: Layout): { y: number; h: number } {
     return { y: l.top, h: l.bottom - l.top };
   }
 
+  /** Column background container: legacy stage / column lights, or ArgonColumnBackground. */
   private drawColumnBackgrounds(ctx: CanvasRenderingContext2D, l: Layout, time: number): void {
     const { y, h } = this.stageVerticalExtent(l);
 
     const L = this.legacy;
     if (L) {
       for (let s = 0; s < this.playable.stages.length; s++) {
-        const cols = this.columns.filter(c => c.stage === s).map(c => ({ col: this.legacyColumns[c.index], x: c.x, width: c.width }));
+        const cols = this.columns
+          .filter(c => c.stage === s)
+          .map(c => ({
+            col: this.legacyColumns[c.index],
+            x: c.x,
+            width: c.width,
+          }));
         L.drawStage(ctx, l.stageLeft[s], l.stageWidth[s], y, h, cols, this.upwards);
         L.drawHitTarget(ctx, l.stageLeft[s], l.stageWidth[s], l.hitY);
       }
-      for (const c of this.columns) L.drawColumnLight(ctx, this.legacyColumns[c.index], c.x, c.width, this.upwards ? l.top : l.bottom, this.upwards, c.down, c.pressTime, c.releaseTime, time);
+      for (const c of this.columns)
+        L.drawColumnLight(
+          ctx,
+          this.legacyColumns[c.index],
+          c.x,
+          c.width,
+          this.upwards ? l.top : l.bottom,
+          this.upwards,
+          c.down,
+          c.pressTime,
+          c.releaseTime,
+          time,
+        );
       return;
     }
 
+    const now = this.realTime(time);
     for (const c of this.columns) {
-      // ArgonColumnBackground: accent darkened (x4) at 80% opacity.
+      ctx.save();
+      // Masking with CornerRadius = ArgonNotePiece.CORNER_RADIUS
+      ctx.beginPath();
+      roundRectPath(ctx, c.x, y, c.width, h, CORNER_RADIUS);
+      ctx.clip();
+      // Background: accent.Darken(3).Opacity(0.8f)
       ctx.fillStyle = css(darkenC4(c.colour, 3), 0.8);
-      roundRect(ctx, c.x, y, c.width, h, CORNER_RADIUS);
-      ctx.fill();
+      ctx.fillRect(c.x, y, c.width, h);
 
-      // Pressed gradient overlay over the half towards the hit target.
-      let alpha: number;
-      if (c.down) {
-        const t = time - c.pressTime;
-        alpha = t < 50 ? easeOutQuint(t / 50) : 1 - 0.5 * easeOutQuint((t - 50) / 250);
-      } else {
-        const t = time - c.releaseTime;
-        const startAlpha = 0.5;
-        alpha = startAlpha * (1 - easeOutQuint(t / 250));
-      }
-      if (alpha > 0.005) {
+      // Background gradient overlay (Height 0.5, additive) on the half nearest the hit target.
+      const alpha = c.anim.overlay.valueAt(now);
+      if (alpha > 0.002) {
         const half = h * 0.5;
         const y0 = this.upwards ? y : y + half;
         const grad = ctx.createLinearGradient(0, y0, 0, y0 + half);
@@ -912,46 +1049,74 @@ export class DrawableManiaRuleset implements DrawableRuleset {
         const dim = css(c.colour, 0);
         grad.addColorStop(0, this.upwards ? bright : dim);
         grad.addColorStop(1, this.upwards ? dim : bright);
-        ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         ctx.fillStyle = grad;
         ctx.fillRect(c.x, y0, c.width, half);
-        ctx.restore();
       }
+      ctx.restore();
     }
   }
 
-  private drawBarLines(ctx: CanvasRenderingContext2D, l: Layout, currentRel: number): void {
+  /** DrawableBarLine + DefaultBarLine (the argon skin has no bar line of its own), masked vertically to the stage. */
+  private drawBarLines(ctx: CanvasRenderingContext2D, l: Layout, currentRel: number, time: number): void {
     const bars = this.barLines;
     if (bars.length === 0) return;
     const maxPos = l.scrollLength + NOTE_HEIGHT;
+    const { y: top, h } = this.stageVerticalExtent(l);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, top, l.W, h);
+    ctx.clip();
 
     for (let s = 0; s < this.playable.stages.length; s++) {
       const left = l.stageLeft[s];
       const width = l.stageWidth[s];
       for (const bar of bars) {
+        // UpdateStartTimeStateTransforms: FadeOut(150)
+        let alpha = 1;
+        if (time > bar.startTime) alpha = 1 - (time - bar.startTime) / 150;
+        if (alpha <= 0) continue;
         const pos = this.positionAt(bar.startTime, currentRel, l);
-        if (pos < -NOTE_HEIGHT) continue;
         if (pos > maxPos) break;
-        const y = this.yAt(pos, l);
-        // DefaultBarLine: major 1.7 high at 50%, minor 1.2 high at 20%.
-        ctx.fillStyle = bar.major ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.2)';
+        // The 1 unit tall DrawableBarLine sits on the hit position side of its time; DefaultBarLine is centred on it.
+        const centre = this.yAt(pos, l) + (this.upwards ? 0.5 : -0.5);
         const hh = bar.major ? 1.7 : 1.2;
-        ctx.fillRect(left, this.upwards ? y : y - hh, width, hh);
+        const mainAlpha = bar.major ? 0.5 : 0.2;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = `rgba(255,255,255,${mainAlpha})`;
+        ctx.fillRect(left, centre - hh / 2, width, hh);
+        if (bar.major) {
+          // Left / right anchors: 10 wide additive gradients at mainLine.Alpha * 0.3
+          ctx.globalCompositeOperation = 'lighter';
+          const a = mainAlpha * 0.3;
+          const lg = ctx.createLinearGradient(left - BAR_LINE_MAJOR_EXTENSION, 0, left, 0);
+          lg.addColorStop(0, 'rgba(255,255,255,0)');
+          lg.addColorStop(1, `rgba(255,255,255,${a})`);
+          ctx.fillStyle = lg;
+          ctx.fillRect(left - BAR_LINE_MAJOR_EXTENSION, centre - hh / 2, BAR_LINE_MAJOR_EXTENSION, hh);
+          const rg = ctx.createLinearGradient(left + width, 0, left + width + BAR_LINE_MAJOR_EXTENSION, 0);
+          rg.addColorStop(0, `rgba(255,255,255,${a})`);
+          rg.addColorStop(1, 'rgba(255,255,255,0)');
+          ctx.fillStyle = rg;
+          ctx.fillRect(left + width, centre - hh / 2, BAR_LINE_MAJOR_EXTENSION, hh);
+          ctx.globalCompositeOperation = 'source-over';
+        }
       }
     }
+    ctx.restore();
   }
 
   private drawHitTargets(ctx: CanvasRenderingContext2D, l: Layout): void {
     // Legacy skins sandwich the hit target between the column background and the column light (drawn in drawColumnBackgrounds).
     if (this.legacy) return;
-    // ArgonHitTarget: 30% white additive strip of the note accent height at the hit position.
+    // ArgonHitTarget: a white additive box (alpha 0.3) of the note accent height at the hit position, CornerRadius masking.
     const h = NOTE_HEIGHT * NOTE_ACCENT_RATIO;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = 'rgba(255,255,255,0.3)';
     for (const c of this.columns) {
-      roundRect(ctx, c.x, this.upwards ? l.hitY : l.hitY - h, c.width, h, CORNER_RADIUS);
+      ctx.beginPath();
+      roundRectPath(ctx, c.x, this.upwards ? l.hitY : l.hitY - h, c.width, h, CORNER_RADIUS);
       ctx.fill();
     }
     ctx.restore();
@@ -1041,14 +1206,18 @@ export class DrawableManiaRuleset implements DrawableRuleset {
     }
   }
 
-  /** DrawableManiaHitObject.UpdateHitStateTransforms: hit -> instant fade, miss -> 150ms fade (Easing.In). */
+  /** DrawableManiaHitObject.UpdateHitStateTransforms: hit -> FadeOut(), miss -> FadeOut(150, Easing.In). */
   private objectAlpha(state: JudgeState, time: number): number {
     if (!state.judged) return 1;
     if (isHit(state.result)) return 0;
     const t = (time - state.judgeTime) / MISS_FADE;
-    return t >= 1 ? 0 : 1 - t * t;
+    return t >= 1 ? 0 : 1 - applyEasing(Easing.In, Math.max(0, t));
   }
 
+  /**
+   * DrawableHoldNote layout: the head sits at the start time (frozen at the hit position while held), the body piece spans
+   * from the middle of the head to the middle of the tail, and the body + tail are masked to beyond the head's middle.
+   */
   private drawHold(
     ctx: CanvasRenderingContext2D,
     l: Layout,
@@ -1063,164 +1232,194 @@ export class DrawableManiaRuleset implements DrawableRuleset {
     if (endPos < minPos) return;
 
     // The whole hold note fades with its own judgement.
-    let alpha = this.objectAlpha(hold, time);
+    const alpha = this.objectAlpha(hold, time);
     if (alpha <= 0) return;
-    if (hold.isMissing) alpha *= 0.5;
 
     const holding = time >= hold.obj.startTime && hold.head.isHit && !hold.droppedHoldAfter(hold.obj.startTime);
     const headPos = holding ? Math.max(0, startPos) : startPos;
 
     const half = NOTE_HEIGHT / 2;
     const dir = this.upwards ? 1 : -1;
-    // Body spans from the middle of the head to the middle of the tail.
     const bodyStart = this.yAt(headPos, l) + dir * half;
     const bodyEnd = this.yAt(endPos, l) + dir * half;
+    const hitting = this.hittingLayerAlpha(hold, time);
 
     ctx.save();
-    ctx.globalAlpha = alpha;
+    ctx.globalAlpha *= alpha;
 
-    if (holding) {
-      // The masking container clips the body and tail to the region before the head (half-way under it).
-      const clipY = this.yAt(0, l) + dir * half;
-      ctx.beginPath();
-      if (this.upwards) ctx.rect(c.x, clipY, c.width, l.H - clipY);
-      else ctx.rect(c.x, 0, c.width, clipY);
-      ctx.clip();
-    }
+    ctx.save();
+    // maskingContainer: padded by half the head on the hit target side, shrinking with the sizing container while held.
+    const clipY = this.yAt(headPos, l) + dir * half;
+    ctx.beginPath();
+    if (this.upwards) ctx.rect(c.x, clipY, c.width, l.H - clipY);
+    else ctx.rect(c.x, 0, c.width, clipY);
+    ctx.clip();
 
     const top = Math.min(bodyStart, bodyEnd);
     const bottom = Math.max(bodyStart, bodyEnd);
     if (bottom > top) {
-      // ArgonHoldBodyPiece: accent darkened 0.6
-      ctx.fillStyle = this.pieceStyle(ctx, c).tailFill;
-      roundRect(ctx, c.x, top, c.width, bottom - top, CORNER_RADIUS);
-      ctx.fill();
-
-      if (holding && hold.isHolding(time)) {
-        // ArgonHoldNoteHittingLayer: pulsing additive accent while held.
-        const phase = (time % 160) / 160;
-        const pulse = phase < 0.5 ? 0.5 + 0.5 * Math.sin((phase / 0.5) * (Math.PI / 2)) : 1 - 0.5 * (1 - Math.cos(((phase - 0.5) / 0.5) * (Math.PI / 2)));
-        ctx.save();
+      // ArgonHoldBodyPiece: Masking with CornerRadius; accent.Darken(0.6f) + ArgonHoldNoteHittingLayer
+      ctx.save();
+      ctx.beginPath();
+      roundRectPath(ctx, c.x, top, c.width, bottom - top, CORNER_RADIUS);
+      ctx.clip();
+      ctx.fillStyle = css(darkenC4(c.colour, 0.6));
+      ctx.fillRect(c.x, top, c.width, bottom - top);
+      if (hitting > 0.002) {
         ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = css(lightenC4(c.colour, 0.2), 0.3 * pulse);
+        ctx.fillStyle = css(lightenC4(c.colour, 0.2), 0.3 * hitting);
         ctx.fillRect(c.x, top, c.width, bottom - top);
-        ctx.restore();
       }
+      ctx.restore();
     }
 
-    // Tail (DrawableHoldNoteTail: hidden instantly once hit)
-    if (!(hold.tail.judged && hold.tail.isHit)) this.drawTail(ctx, c, this.yAt(endPos, l));
-
+    // DrawableHoldNoteTail: hidden instantly once hit, FadeOut(150, In) when missed.
+    const tailAlpha = this.objectAlpha(hold.tail, time);
+    if (tailAlpha > 0) this.drawTail(ctx, c, this.yAt(endPos, l), tailAlpha, hitting);
     ctx.restore();
 
     // Head (never hidden on its own; follows the hit position while held)
-    ctx.save();
-    ctx.globalAlpha = alpha;
     this.drawNote(ctx, c, this.yAt(headPos, l), 1, true);
     ctx.restore();
   }
 
-  /** ArgonNotePiece: `edgeY` is the edge of the note nearest to the hit target. */
-  /** Per-context gradient cache for note pieces (gradients are built in note-local coordinates and used with translate()). */
-  private readonly pieceCache = new WeakMap<CanvasRenderingContext2D, Map<number, NotePieceStyle>>();
-
-  private pieceStyle(ctx: CanvasRenderingContext2D, c: ColumnState): NotePieceStyle {
-    let map = this.pieceCache.get(ctx);
-    if (!map) this.pieceCache.set(ctx, (map = new Map()));
-    let style = map.get(c.index);
-    if (style) return style;
-
-    const h = NOTE_HEIGHT;
-    const up = this.upwards;
-
-    // Shadow gradient (transparent -> black towards the hit target)
-    const shadow = ctx.createLinearGradient(0, 0, 0, h);
-    shadow.addColorStop(up ? 1 : 0, 'rgba(0,0,0,0)');
-    shadow.addColorStop(up ? 0 : 1, 'rgba(0,0,0,1)');
-
-    // Accent box (82% of the height, nearest to the hit target), accent.Lighten(0.1) -> accent
-    const accentH = h * NOTE_ACCENT_RATIO;
-    const accentTop = up ? 0 : h - accentH;
-    const accent = ctx.createLinearGradient(0, accentTop, 0, accentTop + accentH);
-    const light = css(lightenC4(c.colour, 0.1));
-    const base = css(c.colour);
-    accent.addColorStop(0, up ? base : light);
-    accent.addColorStop(1, up ? light : base);
-
-    // Tail: darkened accent with a soft highlight away from the hit target.
-    const tailHighlight = ctx.createLinearGradient(0, 0, 0, h);
-    tailHighlight.addColorStop(up ? 1 : 0, css(lightenC4(c.colour, 0.4), 0.45));
-    tailHighlight.addColorStop(up ? 0 : 1, css(c.colour, 0));
-
-    style = { shadow, accent, accentTop, accentH, tailFill: css(darkenC4(c.colour, 0.6)), tailHighlight };
-    map.set(c.index, style);
-    return style;
+  /**
+   * ArgonHoldNoteHittingLayer alpha: while holding, FadeTo(1, 80, OutSine).Then().FadeTo(0.5f, 80, InSine).Loop(), started on
+   * the next multiple of 160ms; on release FadeOut(80).
+   */
+  private hittingLayerAlpha(hold: DHold, time: number): number {
+    const ANIMATION_LENGTH = 80;
+    let fn: (t: number) => number = () => 0;
+    for (const s of hold.holdingStates) {
+      if (!Number.isFinite(s.time)) continue;
+      if (s.time > time) break;
+      const at = fn(s.time);
+      if (s.holding) {
+        const first = s.time + (ANIMATION_LENGTH * 2 - (s.time % (ANIMATION_LENGTH * 2)));
+        fn = t => {
+          if (t < first) return at;
+          const n = Math.floor((t - first) / (ANIMATION_LENGTH * 2));
+          const e = t - first - n * ANIMATION_LENGTH * 2;
+          if (e < ANIMATION_LENGTH) {
+            const from = n === 0 ? at : 0.5;
+            return from + (1 - from) * applyEasing(Easing.OutSine, e / ANIMATION_LENGTH);
+          }
+          return 1 - 0.5 * applyEasing(Easing.InSine, (e - ANIMATION_LENGTH) / ANIMATION_LENGTH);
+        };
+      } else {
+        const start = s.time;
+        fn = t => at * (1 - clamp01((t - start) / ANIMATION_LENGTH));
+      }
+    }
+    return clamp01(fn(time));
   }
 
-  /** ArgonNotePiece: `edgeY` is the edge of the note nearest to the hit target. */
+  /**
+   * Draws a note-shaped piece of NOTE_HEIGHT whose hit-target-side edge is at `edgeY`, in a local frame where y grows away
+   * from the hit target... i.e. flipped for upwards scrolling (`Scale = (1, -1)`), with (0, 0) at the top-left of the piece
+   * as drawn for downwards scrolling.
+   */
+  private withPieceFrame(ctx: CanvasRenderingContext2D, c: ColumnState, edgeY: number, draw: () => void): void {
+    ctx.save();
+    if (this.upwards) {
+      ctx.translate(c.x, edgeY + NOTE_HEIGHT);
+      ctx.scale(1, -1);
+    } else ctx.translate(c.x, edgeY - NOTE_HEIGHT);
+    draw();
+    ctx.restore();
+  }
+
+  /** ArgonNotePiece / ArgonHoldNoteHeadPiece. `edgeY` is the edge of the note nearest to the hit target. */
   private drawNote(ctx: CanvasRenderingContext2D, c: ColumnState, edgeY: number, alpha: number, isHead: boolean): void {
     const w = c.width;
     const h = NOTE_HEIGHT;
-    const up = this.upwards;
-    const top = up ? edgeY : edgeY - h;
-    const style = this.pieceStyle(ctx, c);
+    const accentH = h * NOTE_ACCENT_RATIO;
+    this.withPieceFrame(ctx, c, edgeY, () => {
+      if (alpha < 1) ctx.globalAlpha *= alpha;
+      // Masking, CornerRadius
+      ctx.beginPath();
+      roundRectPath(ctx, 0, 0, w, h, CORNER_RADIUS);
+      ctx.clip();
 
-    ctx.save();
-    if (alpha < 1) ctx.globalAlpha *= alpha;
-    ctx.translate(c.x, top);
+      // Box: GradientVertical(Black.Opacity(0), Black)
+      const shadow = ctx.createLinearGradient(0, 0, 0, h);
+      shadow.addColorStop(0, 'rgba(0,0,0,0)');
+      shadow.addColorStop(1, 'rgba(0,0,0,1)');
+      ctx.fillStyle = shadow;
+      ctx.fillRect(0, 0, w, h);
 
-    ctx.fillStyle = style.shadow;
-    roundRect(ctx, 0, 0, w, h, CORNER_RADIUS);
-    ctx.fill();
+      // Accent container (BottomLeft, Height = NOTE_ACCENT_RATIO, CornerRadius): GradientVertical(accent.Lighten(0.1f), accent)
+      const accent = ctx.createLinearGradient(0, h - accentH, 0, h);
+      accent.addColorStop(0, css(lightenC4(c.colour, 0.1)));
+      accent.addColorStop(1, css(c.colour));
+      ctx.fillStyle = accent;
+      ctx.beginPath();
+      roundRectPath(ctx, 0, h - accentH, w, accentH, CORNER_RADIUS);
+      ctx.fill();
 
-    ctx.fillStyle = style.accent;
-    roundRect(ctx, 0, style.accentTop, w, style.accentH, CORNER_RADIUS);
-    ctx.fill();
+      // Circle (BottomLeft, Height = CORNER_RADIUS * 2)
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      roundRectPath(ctx, 0, h - CORNER_RADIUS * 2, w, CORNER_RADIUS * 2, CORNER_RADIUS);
+      ctx.fill();
 
-    // White strip at the edge nearest to the hit target
-    ctx.fillStyle = '#ffffff';
-    const stripH = CORNER_RADIUS * 2;
-    roundRect(ctx, 0, up ? 0 : h - stripH, w, stripH, CORNER_RADIUS);
-    ctx.fill();
-
-    // Chevron icon (FontAwesome AngleDown, squashed vertically), pointing towards the hit target.
-    const cx = w / 2;
-    const cy = h / 2 + (up ? -4 : 4);
-    const iw = isHead ? 8 : 7;
-    const ih = (up ? -4.5 : 4.5) / 2;
-    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
-    ctx.lineWidth = 2.6;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(cx - iw, cy - ih);
-    ctx.lineTo(cx, cy + ih);
-    ctx.lineTo(cx + iw, cy - ih);
-    ctx.stroke();
-
-    ctx.restore();
+      if (isHead) {
+        // ArgonHoldNoteHeadPiece icon: Circle 20x5 at Y = 2
+        ctx.beginPath();
+        roundRectPath(ctx, w / 2 - 10, h / 2 + 2 - 2.5, 20, 5, 2.5);
+        ctx.fill();
+      } else {
+        // SpriteIcon AngleDown, Size 20, Scale (1, 0.7), Y = 4
+        drawIcon(ctx, FA_ANGLE_DOWN, w / 2, h / 2 + 4, 20, 1, 0.7);
+      }
+    });
   }
 
-  /** ArgonHoldNoteTailPiece: darkened accent cap with a soft highlight. */
-  private drawTail(ctx: CanvasRenderingContext2D, c: ColumnState, edgeY: number): void {
+  /** ArgonHoldNoteTailPiece: `edgeY` is the edge nearest to the hit target. */
+  private drawTail(ctx: CanvasRenderingContext2D, c: ColumnState, edgeY: number, alpha: number, hitting: number): void {
+    const w = c.width;
     const h = NOTE_HEIGHT;
-    const top = this.upwards ? edgeY : edgeY - h;
-    const style = this.pieceStyle(ctx, c);
-    ctx.save();
-    ctx.translate(c.x, top);
-    ctx.fillStyle = style.tailFill;
-    roundRect(ctx, 0, 0, c.width, h, CORNER_RADIUS);
-    ctx.fill();
-    ctx.fillStyle = style.tailHighlight;
-    ctx.fill();
-    ctx.restore();
+    const accentH = h * NOTE_ACCENT_RATIO;
+    this.withPieceFrame(ctx, c, edgeY, () => {
+      if (alpha < 1) ctx.globalAlpha *= alpha;
+      ctx.beginPath();
+      roundRectPath(ctx, 0, 0, w, h, CORNER_RADIUS);
+      ctx.clip();
+
+      // Box (Height 0.9): GradientVertical(Black.Opacity(0), Black)
+      const shadow = ctx.createLinearGradient(0, 0, 0, h * 0.9);
+      shadow.addColorStop(0, 'rgba(0,0,0,0)');
+      shadow.addColorStop(1, 'rgba(0,0,0,1)');
+      ctx.fillStyle = shadow;
+      ctx.fillRect(0, 0, w, h * 0.9);
+
+      // Accent container (BottomCentre, Height = NOTE_ACCENT_RATIO, CornerRadius)
+      ctx.beginPath();
+      roundRectPath(ctx, 0, h - accentH, w, accentH, CORNER_RADIUS);
+      ctx.clip();
+      // foreground: accent.Darken(0.6f)
+      ctx.fillStyle = css(darkenC4(c.colour, 0.6));
+      ctx.fillRect(0, h - accentH, w, accentH);
+      ctx.globalCompositeOperation = 'lighter';
+      // hittingLayer
+      if (hitting > 0.002) {
+        ctx.fillStyle = css(lightenC4(c.colour, 0.2), 0.3 * hitting);
+        ctx.fillRect(0, h - accentH, w, accentH);
+      }
+      // foregroundAdditive (Height 0.5, additive): GradientVertical(accent.Opacity(0.4f), accent.Opacity(0))
+      const add = ctx.createLinearGradient(0, h - accentH, 0, h - accentH / 2);
+      add.addColorStop(0, css(c.colour, 0.4));
+      add.addColorStop(1, css(c.colour, 0));
+      ctx.fillStyle = add;
+      ctx.fillRect(0, h - accentH, w, accentH / 2);
+    });
   }
 
   private applyCover(layer: CanvasRenderingContext2D, l: Layout): void {
     // PlayfieldCoveringWrapper + ManiaModHidden.LegacyPlayfieldCover.GetHeight (covers the hit object area of each column).
     const availablePlayfieldHeight = Math.abs(REFERENCE_PLAYFIELD_HEIGHT - HIT_TARGET_POSITION);
     const filledRel = (this.coverage * REFERENCE_PLAYFIELD_HEIGHT) / availablePlayfieldHeight;
-    const gradientAlpha = this.coverage > 0.0005 ? 1 : 0;
+    const gradientAlpha = clamp01(this.coverGradientAlpha);
 
     const areaH = l.scrollLength;
     // The hit object area spans from the far end of the stage to the hit position.
@@ -1270,198 +1469,247 @@ export class DrawableManiaRuleset implements DrawableRuleset {
     layer.restore();
   }
 
-  private drawKeyAreas(ctx: CanvasRenderingContext2D, l: Layout, time: number): void {
-    if (this.legacy) {
-      for (const c of this.columns) this.legacy.drawKey(ctx, this.legacyColumns[c.index], c.x, c.width, this.upwards ? l.top : l.bottom, this.upwards, c.down, c.releaseTime, time);
+  /** Stage top level container: per column, the (proxied) key area and then the hit explosions. */
+  private drawColumnTopLevel(ctx: CanvasRenderingContext2D, l: Layout, time: number): void {
+    const L = this.legacy;
+    if (L) {
+      for (const c of this.columns)
+        L.drawKey(ctx, this.legacyColumns[c.index], c.x, c.width, this.upwards ? l.top : l.bottom, this.upwards, c.down, c.releaseTime, time);
+      for (const c of this.columns) {
+        compactExplosions(c, time);
+        for (const e of c.explosions) L.drawExplosion(ctx, this.legacyColumns[c.index], c.x, c.width, l.hitY, e.time, time);
+      }
       return;
     }
-    // ArgonKeyArea: from just before the hit target to the end of the stage.
-    const areaH = HIT_TARGET_POSITION + CORNER_RADIUS * 2;
-    const up = this.upwards;
-    const areaTop = up ? l.top : l.bottom - areaH;
-
     for (const c of this.columns) {
-      const lighting = mixC4(c.colour, [255, 255, 255], 0.2);
-
-      // Background
-      let bgAlpha: number;
-      let flash = 0;
-      if (c.down) {
-        const t = time - c.pressTime;
-        bgAlpha = t < 70 ? easeOutQuint(t / 70) : 1 - 0.2 * clamp01((t - 70) / 500);
-        flash = 1 - easeOutQuint(t / 200);
-      } else {
-        const t = time - c.releaseTime;
-        bgAlpha = t < 50 ? 0.3 + 0.7 * (1 - easeOutQuint(t / 50)) : 0.3 * (1 - easeOutQuint((t - 50) / 800));
-        if (!Number.isFinite(c.releaseTime)) bgAlpha = 0;
-      }
-      if (bgAlpha > 0.005) {
-        const colour = mixC4(darkenC4(c.colour, 0.2), lightenC4(c.colour, 0.8), flash);
-        ctx.fillStyle = css(colour, bgAlpha);
-        roundRect(ctx, c.x, areaTop, c.width, areaH, CORNER_RADIUS);
-        ctx.fill();
-      }
-
-      // Lighting amount for the line / icons (fade in 70ms, fade out 800ms).
-      const light = c.down ? easeOutQuint((time - c.pressTime) / 70) : 1 - easeOutQuint((time - c.releaseTime) / 800);
-      const lightAmount = Number.isFinite(c.releaseTime) || c.down ? clamp01(light) : 0;
-
-      // Hit target line
-      const lineY = up ? areaTop + areaH - CORNER_RADIUS * 2 : areaTop;
-      const grey = 196 + (255 - 196) * lightAmount;
-      if (lightAmount > 0.01) {
-        ctx.save();
-        ctx.shadowColor = css(lighting, 0.4 * lightAmount);
-        ctx.shadowBlur = 20;
-        ctx.fillStyle = `rgb(${grey | 0},${grey | 0},${grey | 0})`;
-        roundRect(ctx, c.x, lineY, c.width, CORNER_RADIUS * 2, CORNER_RADIUS);
-        ctx.fill();
-        ctx.restore();
-      } else {
-        ctx.fillStyle = `rgb(${grey | 0},${grey | 0},${grey | 0})`;
-        roundRect(ctx, c.x, lineY, c.width, CORNER_RADIUS * 2, CORNER_RADIUS);
-        ctx.fill();
-      }
-
-      const cx = c.x + c.width / 2;
-
-      // Top icon: rounded outline 22x14 at 30 from the hit target line.
-      const iconScale = 1 - 0.1 * lightAmount;
-      const topIconY = up ? areaTop + areaH - 30 : areaTop + 30;
-      ctx.save();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 3;
-      const iw = 22 * iconScale;
-      const ih = 14 * iconScale;
-      roundRect(ctx, cx - iw / 2 + 1.5, topIconY - ih / 2 + 1.5, iw - 3, ih - 3, (ih - 3) / 2);
-      ctx.stroke();
-      ctx.restore();
-
-      // Bottom icon: three dots near the far end of the key area.
-      const dotColour = mixC4(c.colour, [255, 255, 255], lightAmount);
-      const baseY = up ? areaTop + 30 : areaTop + areaH - 30;
-      const dir = up ? -1 : 1;
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = css(dotColour);
-      if (lightAmount > 0.01) {
-        ctx.shadowColor = css(lighting, 0.6 * lightAmount);
-        ctx.shadowBlur = 16;
-      }
-      const dots: [number, number][] = [
-        [0, 0],
-        [-7, 7 * 1.2],
-        [7, 7 * 1.2],
-      ];
-      for (const [dx, dy] of dots) {
-        ctx.beginPath();
-        ctx.arc(cx + dx, baseY + dir * dy, 4, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
+      this.drawKeyArea(ctx, l, c, time);
+      this.drawExplosions(ctx, l, c, time);
     }
   }
 
-  private drawExplosions(ctx: CanvasRenderingContext2D, l: Layout, time: number): void {
-    if (this.legacy) {
-      for (const c of this.columns) {
-        const e = c.explosion;
-        if (!e) continue;
-        if (time - e.time >= EXPLOSION_DURATION) {
-          c.explosion = null;
-          continue;
-        }
-        this.legacy.drawExplosion(ctx, this.legacyColumns[c.index], c.x, c.width, l.hitY, e.time, time);
-      }
-      return;
+  /** ArgonKeyArea (flipped for upwards scrolling), animated on the game-wide clock. */
+  private drawKeyArea(ctx: CanvasRenderingContext2D, l: Layout, c: ColumnState, time: number): void {
+    const now = this.realTime(time);
+    const a = c.anim;
+    const areaH = HIT_TARGET_POSITION + CORNER_RADIUS * 2;
+    const w = c.width;
+    const lighting = mixC4(c.colour, [255, 255, 255], 0.2);
+
+    ctx.save();
+    // directionContainer: BottomLeft anchored (down) / TopLeft anchored with Scale (1, -1) (up); local y = 0 at the hit target line.
+    if (this.upwards) {
+      ctx.translate(c.x, l.top + areaH);
+      ctx.scale(1, -1);
+    } else ctx.translate(c.x, l.bottom - areaH);
+
+    // Key gradient (Darken(0.2f)): FlashColour(Lighten(0.8f), 200, OutQuint) + alpha transforms
+    const bgAlpha = a.keyBg.valueAt(now);
+    if (bgAlpha > 0.002) {
+      const colour = mixC4(darkenC4(c.colour, 0.2), lightenC4(c.colour, 0.8), clamp01(a.keyFlash.valueAt(now)));
+      ctx.fillStyle = css(colour, bgAlpha);
+      ctx.beginPath();
+      roundRectPath(ctx, 0, 0, w, areaH, CORNER_RADIUS);
+      ctx.fill();
     }
-    // ArgonHitExplosion: an additive glow over the hit target, fading out over 200ms.
-    const h = NOTE_HEIGHT * NOTE_ACCENT_RATIO;
-    for (const c of this.columns) {
-      const e = c.explosion;
-      if (!e) continue;
-      const t = (time - e.time) / EXPLOSION_DURATION;
-      if (t >= 1 || t < 0) {
-        if (t >= 1) c.explosion = null;
-        continue;
-      }
-      const alpha = 1 - easeOutQuint(t) * 0.999;
-      const y = this.upwards ? l.hitY : l.hitY - h;
+
+    const light = clamp01(a.light.valueAt(now));
+
+    // Hit target line: Circle, Gray(196) -> White, with a glow (lighting @ 0.4, radius 20 / 25)
+    const lineGlowAlpha = a.lineGlowAlpha.valueAt(now);
+    if (lineGlowAlpha > 0.002) drawRoundRectGlow(ctx, 0, 0, w, CORNER_RADIUS * 2, CORNER_RADIUS, a.lineGlowRadius.valueAt(now), lighting, lineGlowAlpha);
+    const grey = 196 + (255 - 196) * light;
+    ctx.fillStyle = `rgb(${grey | 0},${grey | 0},${grey | 0})`;
+    ctx.beginPath();
+    roundRectPath(ctx, 0, 0, w, CORNER_RADIUS * 2, CORNER_RADIUS);
+    ctx.fill();
+
+    const cx = w / 2;
+
+    // Bottom icon: three additive 8px circles at -30 from the far end, coloured accent -> white, glow (lighting @ 0.2, radius 60 / 30)
+    {
+      const baseY = areaH - 30;
+      const dotColour = mixC4(c.colour, [255, 255, 255], light);
+      const glowAlpha = a.dotGlowAlpha.valueAt(now);
+      const glowRadius = a.dotGlowRadius.valueAt(now);
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      ctx.shadowColor = css(c.colour, alpha);
-      ctx.shadowBlur = 40;
-      ctx.fillStyle = css(mixC4(c.colour, [255, 255, 255], 0.8), alpha);
-      roundRect(ctx, c.x, y, c.width, h, CORNER_RADIUS);
+      // The auto-sized container (Origin Centre) spans the three circles: [-4, 12.4] around the first one.
+      const dots: [number, number][] = [
+        [0, -4.2],
+        [-7, -4.2 + 7 * 1.2],
+        [7, -4.2 + 7 * 1.2],
+      ];
+      for (const [dx, dy] of dots) {
+        if (glowAlpha > 0.002) drawCircleGlow(ctx, cx + dx, baseY + dy, 4, glowRadius, mul(lighting, dotColour), glowAlpha);
+        ctx.fillStyle = css(dotColour);
+        fillCircle(ctx, cx + dx, baseY + dy, 4);
+      }
+      ctx.restore();
+    }
+
+    // Top icon: CircularContainer 22x14 at 30 from the line, BorderThickness 4, ScaleTo(0.9f) when pressed, glow (lighting @ 0.1, radius 20)
+    {
+      const s = a.iconScale.valueAt(now);
+      const iw = 22 * s;
+      const ih = 14 * s;
+      const glowAlpha = a.iconGlowAlpha.valueAt(now);
+      if (glowAlpha > 0.002) drawRoundRectGlow(ctx, cx - iw / 2, 30 - ih / 2, iw, ih, ih / 2, 20 * s, lighting, glowAlpha);
+      ctx.fillStyle = '#fff';
+      fillPillBorder(ctx, cx - iw / 2, 30 - ih / 2, iw, ih, 4 * s);
+    }
+    ctx.restore();
+  }
+
+  /** ArgonHitExplosion: a NOTE_HEIGHT tall drawable centred NOTE_HEIGHT / 2 before the hit position, FadeOutFromOne(200, Out). */
+  private drawExplosions(ctx: CanvasRenderingContext2D, l: Layout, c: ColumnState, time: number): void {
+    compactExplosions(c, time);
+    if (c.explosions.length === 0) return;
+    const h = NOTE_HEIGHT * NOTE_ACCENT_RATIO;
+    const faint = mixC4(c.colour, [255, 255, 255], 0.8);
+    // largeFaint.Colour multiplies its glow (accent, radius 60, roundness 40) too.
+    const glowColour = mul(c.colour, faint);
+    const top = this.upwards ? l.hitY : l.hitY - h;
+    const cy = top + h / 2;
+    const cx = c.x + c.width / 2;
+    for (const e of c.explosions) {
+      const t = (time - e.time) / EXPLOSION_DURATION;
+      if (t < 0 || t >= 1) continue;
+      const alpha = 1 - applyEasing(Easing.Out, t);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha *= alpha;
+      // The glow of a (width x 34.44) box with corner radius 3.4 + 60 + 40 and blend range 60: a soft ellipse that is fully
+      // opaque within ~(w/2 - 8.8, 15.1) and fades out ((1 - d)^2) at ~(w/2 + 56.6, 76.3) for a 60 wide column.
+      const rx = c.width / 2 + 56.6;
+      const ry = h / 2 + 59.1;
+      const inner = Math.min((c.width / 2 - 8.8) / rx, 15.1 / ry);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(rx, ry);
+      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+      grad.addColorStop(0, css(glowColour, 1));
+      if (inner > 0) grad.addColorStop(inner, css(glowColour, 1));
+      for (let i = 1; i <= 6; i++) {
+        const f = i / 6;
+        grad.addColorStop(Math.max(0, inner) + (1 - Math.max(0, inner)) * f, css(glowColour, (1 - f) * (1 - f)));
+      }
+      ctx.fillStyle = grad;
+      fillCircle(ctx, 0, 0, 1);
+      ctx.restore();
+      ctx.fillStyle = css(faint);
+      ctx.beginPath();
+      roundRectPath(ctx, c.x, top, c.width, h, CORNER_RADIUS);
       ctx.fill();
       ctx.restore();
     }
   }
 
+  /** DrawableManiaJudgement + mania ArgonJudgementPiece (180 above the hit position). */
   private drawJudgements(ctx: CanvasRenderingContext2D, l: Layout, time: number): void {
     for (let s = 0; s < this.stageJudgements.length; s++) {
       const j = this.stageJudgements[s];
       if (!j) continue;
       const t = time - j.time;
-      if (t >= 800 || t < 0) {
-        if (t >= 800) this.stageJudgements[s] = null;
+      if (t >= 1000 || t < 0) {
+        if (t >= 1000) this.stageJudgements[s] = null;
         continue;
       }
 
       const cx = l.stageLeft[s] + l.stageWidth[s] / 2;
       if (this.legacy?.drawJudgement(ctx, j.result, cx, l.top, l.bottom - l.top, this.upwards, j.time, time)) continue;
+      if (t >= 800) continue;
 
       const text = JUDGEMENT_TEXT[j.result];
       if (!text) continue;
+      const colour = JUDGEMENT_COLOUR[j.result] ?? WHITE;
 
       let cy = this.upwards ? l.hitY + JUDGEMENT_Y : l.hitY - JUDGEMENT_Y;
-      let scale: number;
+      let pieceScale = 1;
+      let textScale = 1;
       let rotation = 0;
 
       if (j.result === HitResult.Miss) {
-        scale = t < 100 ? 1.6 - 0.6 * (t / 100) * (t / 100) : 1;
-        cy += 100 * easeInQuint(t / 800);
-        rotation = ((40 * Math.PI) / 180) * easeInQuint(t / 800);
+        // ScaleTo(1.6f).ScaleTo(1, 100, In); MoveToOffset((0, 100), 800, InQuint); RotateTo(40, 800, InQuint)
+        pieceScale = 1.6 - 0.6 * applyEasing(Easing.In, clamp01(t / 100));
+        cy += 100 * applyEasing(Easing.InQuint, clamp01(t / 800));
+        rotation = ((40 * Math.PI) / 180) * applyEasing(Easing.InQuint, clamp01(t / 800));
       } else {
-        scale = 1 + 0.4 * easeOutQuint(t / 1800);
+        // JudgementText.ScaleTo(1.4f, 1800, OutQuint)
+        textScale = 1 + 0.4 * applyEasing(Easing.OutQuint, clamp01(t / 1800));
       }
 
+      // FadeOutFromOne(800)
       const alpha = 1 - t / 800;
 
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(rotation);
-      ctx.scale(scale, scale);
-      ctx.globalAlpha = alpha;
+      ctx.scale(pieceScale, pieceScale);
+      ctx.globalAlpha *= alpha;
       ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = JUDGEMENT_COLOUR[j.result] ?? '#ffffff';
-      ctx.font = '400 28px Torus, "Segoe UI", system-ui, sans-serif';
+      ctx.fillStyle = css(colour);
+      ctx.font = `400 28px ${FONT}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      try {
-        (ctx as unknown as { letterSpacing: string }).letterSpacing = '10px';
-      } catch {
-        // letterSpacing unsupported
+      ctx.save();
+      ctx.scale(textScale, textScale);
+      drawSpacedText(ctx, text, 0, 0, 10);
+      ctx.restore();
+
+      // RingExplosion (hits): travel 52, start_position_ratio 0.3, FadeOutFromOne(1000, OutQuint)
+      if (isHit(j.result)) {
+        const ringAlpha = 1 - applyEasing(Easing.OutQuint, clamp01(t / 1000));
+        let countSmall = 0;
+        let countLarge = 0;
+        let travel = 52;
+        if (j.result === HitResult.Meh) {
+          countSmall = 3;
+          travel *= 0.3;
+        } else if (j.result === HitResult.Ok || j.result === HitResult.Good) {
+          countSmall = 4;
+          travel *= 0.6;
+        } else if (j.result === HitResult.Great || j.result === HitResult.Perfect) {
+          countSmall = 4;
+          countLarge = 4;
+        }
+        if (ringAlpha > 0.002 && countSmall + countLarge > 0) {
+          ctx.globalAlpha *= ringAlpha;
+          const rnd = seededRandom(j.seed);
+          const move = applyEasing(Easing.OutQuint, clamp01(t / 600));
+          for (let i = 0; i < countSmall + countLarge; i++) {
+            const size = i < countSmall ? 9 : 14;
+            // RNG.NextSingle(0, 360) is passed straight to MathF.Cos / MathF.Sin.
+            const direction = rnd() * 360;
+            const distance = travel / 2 + rnd() * (travel / 2);
+            const d = distance * (0.3 + 0.7 * move);
+            fillPillBorder(ctx, Math.cos(direction) * d - size / 2, Math.sin(direction) * d - size / 2, size, size, 4);
+          }
+        }
       }
-      ctx.fillText(text, 5, 0);
       ctx.restore();
     }
   }
 
-  private drawCombo(ctx: CanvasRenderingContext2D, l: Layout): void {
+  /** ArgonManiaComboCounter (MainHUDComponents: TopCentre, Y = 200, flipped to the bottom for upwards scrolling, no label / "x"). */
+  private updateCombo(time: number): void {
     const combo = this.ctx.combo;
-    if (combo <= 0) return;
-    // ArgonManiaComboCounter: 200 from the top (or bottom when scrolling upwards), centred on the playfield.
-    const left = l.stageLeft[0];
-    const right = l.stageLeft[l.stageLeft.length - 1] + l.stageWidth[l.stageWidth.length - 1];
-    const cx = (left + right) / 2;
-    const cy = this.upwards ? l.H - 200 : 200;
+    if (combo !== this.lastCombo) {
+      this.comboCounter.onComboChanged(this.lastCombo, combo, time);
+      this.lastCombo = combo;
+    }
+  }
+
+  private drawCombo(ctx: CanvasRenderingContext2D, l: Layout, time: number): void {
+    this.updateCombo(time);
+    const o = this.comboCounter.options(time);
+    const count = o.text.endsWith('x') ? o.text.slice(0, -1) : o.text;
+    o.text = count;
+    o.wireframeTemplate = '#'.repeat(Math.max(1, count.length));
+    o.label = undefined;
+    const size = measureArgonText(ctx, o);
     ctx.save();
-    ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.font = '600 40px Torus, "Segoe UI", system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(`${combo}x`, cx, cy);
+    const y = this.upwards ? l.H - 200 : 200;
+    drawArgonText(ctx, l.W / 2 - size.width / 2, y - size.height / 2, o, size);
     ctx.restore();
   }
 
@@ -1510,17 +1758,9 @@ function maximumJudgementOffset(obj: ManiaHitObject): number {
   return obj instanceof TailNote ? base * TailNote.RELEASE_WINDOW_LENIENCE : base;
 }
 
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
-  r = Math.max(0, Math.min(r, w / 2, h / 2));
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.arcTo(x + w, y, x + w, y + r, r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
-  ctx.lineTo(x + r, y + h);
-  ctx.arcTo(x, y + h, x, y + h - r, r);
-  ctx.lineTo(x, y + r);
-  ctx.arcTo(x, y, x + r, y, r);
-  ctx.closePath();
+/** Removes hit explosions which have expired (PoolableHitExplosion: Delay(DURATION).Then().Expire()). */
+function compactExplosions(c: ColumnState, time: number): void {
+  let n = 0;
+  while (n < c.explosions.length && time - c.explosions[n].time >= EXPLOSION_DURATION) n++;
+  if (n > 0) c.explosions.splice(0, n);
 }

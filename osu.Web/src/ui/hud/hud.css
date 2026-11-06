@@ -687,3 +687,9 @@
   pointer-events: none;
   z-index: 5;
 }
+
+/* While the PlayerLoader stage is shown, the (blurred) game background shows through. */
+.player.player-loading {
+  background: transparent;
+  cursor: default;
+}

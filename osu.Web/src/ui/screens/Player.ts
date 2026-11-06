@@ -1,6 +1,8 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// Gameplay screen. Port of the essentials of Player / PlayerLoader / GameplayClockContainer / HUDOverlay /
-// BreakOverlay / PauseOverlay / FailOverlay / SkipOverlay.
+// Gameplay screen. Port of osu.Game/Screens/Play/Player.cs (+ SoloPlayer / ReplayPlayer essentials) together with the
+// PlayerLoader stage (PlayerLoader.cs), MasterGameplayClockContainer / GameplayClockContainer start-time and skip logic,
+// BreakTracker, ComboEffects, FailAnimationContainer and the HUD (HUDOverlay + the Argon default layout). The HUD and overlay
+// components live in src/ui/hud.
 
 import type { AudioEngine, LoopingSample, Track } from '../../framework/audio/AudioEngine';
 import { GameplayClock } from '../../framework/audio/GameplayClock';
@@ -10,29 +12,47 @@ import type { Beatmap } from '../../game/beatmaps/Beatmap';
 import type { WorkingBeatmap } from '../../game/beatmaps/WorkingBeatmap';
 import { applyDifficultyAdjust, type ModSet } from '../../game/mods/Mods';
 import type { HealthProcessor } from '../../game/scoring/HealthProcessor';
-import { HitResult, affectsAccuracy, affectsCombo, breaksCombo, isBasic, isHit } from '../../game/scoring/HitResult';
+import { DrainingHealthProcessor } from '../../game/scoring/HealthProcessor';
+import { HitResult, affectsAccuracy, affectsCombo, isBasic, isBonus, isHit, isScorable } from '../../game/scoring/HitResult';
 import type { HitWindows } from '../../game/scoring/HitWindows';
 import type { JudgementResult } from '../../game/scoring/Judgement';
 import type { ScoreProcessor } from '../../game/scoring/ScoreProcessor';
 import type { ScoreRank } from '../../game/scoring/ScoreRank';
 import { createSkin } from '../../game/Skin';
-import { loadActiveSkin, loadBeatmapSkin, type LoadedSkin } from '../../game/skinning';
+import { loadActiveSkin, loadBeatmapSkin, resolveSkinHitSample, type LoadedSkin } from '../../game/skinning';
 import { loadStoryboard, type StoryboardPlayer } from '../../game/storyboard';
 import type { DrawableRuleset, GameplayContext, LoopHandle, PlayableBeatmap, Ruleset } from '../../game/rulesets/Ruleset';
-import { h, keyLabel } from '../dom';
+import { h } from '../dom';
 import type { Game } from '../Game';
 import { Screen } from '../Screen';
 import { ResultsScreen, type PlayResult } from './Results';
 import { ReplayRecorder, type Replay } from '../../game/replays/Replay';
 import { osuPlayfieldTransform } from '../../game/rulesets/osu/playfield';
+import { Anim, Easing } from '../hud/anim';
+import { formatAccuracy } from '../hud/ArgonCounter';
+import { BreakTracker, PAUSE_COOLDOWN_DURATION, RESULTS_DISPLAY_DELAY, findEarliestStartTime, gameplayStartTime, skipTarget, type Period } from '../hud/clock';
+import { GameplayMenuOverlay, HoldForMenuButton, HoldToConfirmOverlay, OsuResumeOverlay, SkipOverlay } from '../hud/DomOverlays';
+import { BreakOverlay, DelayedResumeOverlay, FailAnimation, KiaiFountains, drawLetterbox } from '../hud/GameplayOverlays';
+import { HUDOverlay, type HUDVisibilityMode } from '../hud/HUDOverlay';
+import { PlayerLoaderView } from '../hud/PlayerLoader';
 
-const COMPLETION_DELAY = 1000;
+/** Passed by a retrying player to its replacement (PlayerLoader.OnResuming / prepareForRestart). */
+export interface PlayerRestartInfo {
+  restartCount: number;
+  quick: boolean;
+}
+
+/** PlayerLoader.BACKGROUND_BLUR */
+const LOADER_BACKGROUND_BLUR = 15;
+/** UserDimContainer.BREAK_LIGHTEN_AMOUNT / BACKGROUND_FADE_DURATION */
+const BREAK_LIGHTEN_AMOUNT = 0.3;
+const BACKGROUND_FADE_DURATION = 800;
 
 export class PlayerScreen extends Screen {
   private canvas: HTMLCanvasElement;
   private g: CanvasRenderingContext2D;
-  private loaderEl: HTMLElement;
-  private skipButton: HTMLButtonElement;
+  private readonly loader: PlayerLoaderView;
+  private readonly replayLabel: HTMLDivElement;
 
   private audio!: AudioEngine;
   private beatmap!: Beatmap;
@@ -48,42 +68,87 @@ export class PlayerScreen extends Screen {
   private sampleResolver: (name: string) => AudioBuffer | null | undefined = () => undefined;
 
   private raf = 0;
+  /** Player (and its beatmap) finished loading. */
   private loaded = false;
+  /** The player has been "pushed" (gameplay started). */
+  private gameplayStarted = false;
   private disposed = false;
-  private paused = false;
+  private paused = true;
   private failed = false;
-  private completedAt: number | null = null;
+  private hasPassed = false;
+  private hasQuit = false;
+  private isRestarting = false;
+  private resultsAt: number | null = null;
   private resultsShown = false;
   private lastFrameReal = 0;
   private lastFrameGameTime = 0;
+  /** GameplayClockContainer.StartTime */
   private startTime = 0;
-  private skipTarget: number | null = null;
+  /** DrawableRuleset.GameplayStartTime */
+  private gameplayStart = 0;
   private firstObjectTime = 0;
   private lastObjectTime = 0;
   private easyLives = 2;
-  private failAnimationStart = 0;
-  private pauseOverlay: HTMLElement | null = null;
-  private gameplayStarted = false;
+  private completed = false;
+  private firstComboBreakTime: number | null = null;
+
+  // PlayerLoader stage
+  private loaderEnteredAt = 0;
+  private pushAt: number | null = null;
+  private readonly lowPass = new Anim(22049);
+  private previewStopped = false;
+
+  // Player.OnEntering transitions
+  private enteredAt = 0;
+  private readonly bgDim = new Anim(0.2);
+  private bgDimTarget = -1;
 
   // input
   private bindings = new Map<string, string>(); // code -> action
-  private actionCounts = new Map<string, number>();
   private heldActions = new Map<string, number>(); // action -> hold count
   private actions: { id: string; label: string }[] = [];
   private readonly disableMouseButtons = settings.get('gameplay.disableMouseButtons', false);
-
-  // HUD state
-  private displayedScore = 0;
-  private comboPop = 0;
-  private hitErrors: { offset: number; time: number; result: HitResult }[] = [];
-  private hitWindows: { result: HitResult; length: number }[] = [];
   private loops = new Set<LoopingSample>();
+  private holdVolume = 1;
 
-  // Replays
+  // Replays / autoplay
   private recorder: ReplayRecorder | null = null;
+  /** The replay driving input: an external replay, or the ruleset's generated autoplay. */
+  private playback: Replay | null;
+  private autoplayInternal = false;
   private replayIndex = 0;
+  private replayPaused = false;
   private viewW = 1;
   private viewH = 1;
+  private dpr = 1;
+
+  // HUD and overlays
+  private hud: HUDOverlay | null = null;
+  private breakTracker!: BreakTracker;
+  private lastBreakPeriod: Period | null = null;
+  private wasBreakTime = true;
+  private readonly breakOverlay = new BreakOverlay();
+  private readonly failAnimation = new FailAnimation();
+  private readonly fountains = new KiaiFountains();
+  private failCanvas: HTMLCanvasElement | null = null;
+  private skipIntro: SkipOverlay | null = null;
+  private skipOutro: SkipOverlay | null = null;
+  private autoSkipQueued = false;
+  private nextAutoSkipAt = 0;
+  private readonly pauseMenu: GameplayMenuOverlay;
+  private readonly failMenu: GameplayMenuOverlay;
+  private readonly holdForMenu: HoldForMenuButton;
+  private readonly retryOverlay: HoldToConfirmOverlay;
+  private readonly exitOverlay: HoldToConfirmOverlay;
+  private readonly osuResume = new OsuResumeOverlay();
+  private delayedResume: DelayedResumeOverlay | null = null;
+  private isResuming = false;
+  private lastPauseActionTime: number | null = null;
+  private focusLost = false;
+  private pauseLoop: LoopingSample | null = null;
+
+  /** Last pointer position (CSS px), used by the osu! resume overlay. */
+  private lastPointer: { x: number; y: number } | null = null;
 
   constructor(
     game: Game,
@@ -92,29 +157,66 @@ export class PlayerScreen extends Screen {
     private readonly mods: ModSet,
     /** When set, the play is driven by this replay instead of user input. */
     private readonly replay: Replay | null = null,
+    private readonly restart: PlayerRestartInfo | null = null,
   ) {
     super(game, 'player');
     this.showTriangles = false;
-    this.backgroundDim = 1;
+    this.backgroundDim = 0.2;
+    this.playback = replay;
     this.canvas = h('canvas', { class: 'game' });
+    this.canvas.style.visibility = 'hidden';
     this.g = this.canvas.getContext('2d', { alpha: false, desynchronized: true } as CanvasRenderingContext2DSettings) as CanvasRenderingContext2D;
     const e = working.entry;
-    this.loaderEl = h(
-      'div',
-      { class: 'loader' },
-      h('div', { class: 'meta-title' }, e.title),
-      h('div', { class: 'meta-artist' }, `${e.artist} · [${e.difficultyName}]`),
-      h('div', { class: 'meta-artist', style: { fontSize: '15px' } }, `mapped by ${e.creator}${mods.isEmpty ? '' : ` · ${mods.list.join(' ')}`}`),
-      replay ? h('div', { class: 'meta-artist', style: { fontSize: '15px', color: 'var(--blue)' } }, `Watching ${replay.player}'s replay`) : null,
-      h('div', { class: 'epilepsy-warning', style: { display: 'none' } }, '⚠ This beatmap contains scenes with rapidly flashing colours. Please take caution if you are affected by epilepsy.'),
-      h('div', { class: 'spinner' }),
+    const unicode = settings.get('ui.preferUnicode', false);
+    this.loader = new PlayerLoaderView({
+      title: unicode && e.titleUnicode ? e.titleUnicode : e.title,
+      artist: unicode && e.artistUnicode ? e.artistUnicode : e.artist,
+      version: e.difficultyName,
+      source: e.source,
+      mapper: e.creator,
+      stars: e.rulesetId === ruleset.id && mods.isEmpty ? e.stars : undefined,
+      backgroundUrl: working.getBackgroundUrl(),
+      mods,
+      epilepsyWarning: false,
+      watching: replay ? `Watching ${replay.player}'s replay` : undefined,
+    });
+    this.replayLabel = h('div', { class: 'player-replay-label', style: { display: 'none' } });
+
+    const holdDelay = settings.get('ui.holdActivationDelay', 200);
+    this.pauseMenu = new GameplayMenuOverlay('pause', { onResume: () => this.resume(), onRetry: () => this.retry(false), onQuit: () => this.performExitWithConfirmation() });
+    this.failMenu = new GameplayMenuOverlay('fail', { onRetry: () => this.retry(false), onQuit: () => this.performExitWithConfirmation() });
+    this.holdForMenu = new HoldForMenuButton(holdDelay);
+    this.holdForMenu.hold.onConfirm = () => {
+      this.holdForMenu.confirmed(performance.now());
+      this.performExitWithConfirmation();
+    };
+    this.retryOverlay = new HoldToConfirmOverlay(holdDelay);
+    this.retryOverlay.hold.onConfirm = () => this.retry(true);
+    this.exitOverlay = new HoldToConfirmOverlay(holdDelay);
+    this.exitOverlay.hold.onConfirm = () => this.performExit();
+    this.osuResume.onResume = () => this.completeResume();
+
+    this.el.classList.add('player-loading');
+    this.el.append(
+      this.canvas,
+      this.replayLabel,
+      this.holdForMenu.el,
+      this.osuResume.el,
+      this.pauseMenu.el,
+      this.failMenu.el,
+      this.loader.el,
+      this.retryOverlay.el,
+      this.exitOverlay.el,
     );
-    this.skipButton = h('button', { class: 'btn primary skip-button', style: { display: 'none' }, onclick: () => this.skip() }, 'Skip ', h('span', { class: 'kbd' }, 'Space'));
-    this.el.append(this.canvas, this.loaderEl, this.skipButton);
   }
 
   onEnter(): void {
-    this.game.stopPreview();
+    this.game.setBackgroundDim(0.2, LOADER_BACKGROUND_BLUR);
+    this.loaderEnteredAt = performance.now();
+    this.loader.enter(this.restart ? (this.restart.quick ? 'quick' : 'restart') : 'first');
+    // A retry comes back to the loader after the initial push delay has already passed.
+    if (this.restart) this.loaderEnteredAt -= 1e6;
+    this.raf = requestAnimationFrame(this.frame);
     void this.load().catch(err => {
       console.error(err);
       this.game.toast(`Couldn't load beatmap: ${err instanceof Error ? err.message : String(err)}`, 'error', 6000);
@@ -126,13 +228,13 @@ export class PlayerScreen extends Screen {
 
   private async load(): Promise<void> {
     this.audio = await this.game.ensureAudio();
+    // PlayerLoader.contentIn: low pass the music to 1000Hz over 650ms (OutQuint).
+    const max = Math.min(22049, this.audio.ctx.sampleRate / 2);
+    this.lowPass.set(max, performance.now()).to(1000, 650, Easing.OutQuint, performance.now());
     await this.audio.loadDefaultSamples();
     this.beatmap = await this.working.getBeatmap();
-    // EpilepsyWarning: show the warning and give the player time to read it.
-    if (this.beatmap.epilepsyWarning) {
-      (this.loaderEl.querySelector('.epilepsy-warning') as HTMLElement).style.display = '';
-      await new Promise(r => setTimeout(r, 3000));
-    }
+    // PlayerLoader: the epilepsy disclaimer (hidden when storyboards are disabled), which also extends PlayerPushDelay.
+    if (this.beatmap.epilepsyWarning && settings.get('gameplay.storyboard', true)) this.loader.addEpilepsyWarning();
     if (!this.ruleset.canConvert(this.beatmap)) throw new Error(`This beatmap can't be played in ${this.ruleset.name}`);
 
     this.playable = this.ruleset.createPlayable(applyDifficultyAdjust(this.beatmap, this.mods), this.mods);
@@ -148,7 +250,7 @@ export class PlayerScreen extends Screen {
       this.working.preloadSamples(this.audio, this.collectSampleLookups()),
       settings.get('gameplay.storyboard', true) ? loadStoryboard(this.working, this.beatmap, this.audio).catch(() => null) : Promise.resolve(null),
       loadActiveSkin(this.audio).catch(() => null),
-      settings.get('skin.beatmapSkins', true) ? loadBeatmapSkin(this.working.set, this.audio).catch(() => null) : Promise.resolve(null),
+      settings.get('skin.beatmapSkins', true) ? loadBeatmapSkin(this.working.set, this.audio, this.working.entry.filename).catch(() => null) : Promise.resolve(null),
       track.ready,
     ]);
     this.background = bg;
@@ -160,7 +262,11 @@ export class PlayerScreen extends Screen {
 
     this.setupProcessors();
     this.setupInput();
-    if (!this.replay && !this.mods.isAutoplay) this.recorder = new ReplayRecorder();
+
+    // Autoplay is a generated replay fed through the normal input path (lazer's ReplayInputHandler), when the ruleset can make one.
+    if (this.mods.isAutoplay && this.ruleset.generateAutoplay && !this.replay) this.playback = this.ruleset.generateAutoplay(this.playable);
+    this.autoplayInternal = this.mods.isAutoplay && this.playback == null;
+    if (!this.playback && !this.mods.isAutoplay) this.recorder = new ReplayRecorder();
 
     const ctx = this.createContext();
     this.drawable = this.ruleset.createDrawableRuleset(this.playable, ctx);
@@ -168,26 +274,18 @@ export class PlayerScreen extends Screen {
     this.firstObjectTime = Math.min(...this.playable.objectTimes.map(t => t.start));
     this.lastObjectTime = Math.max(...this.playable.objectTimes.map(t => t.end));
 
-    // GameplayClockContainer start time: leave enough time to read the first object.
-    const leadIn = Math.max(this.drawable.leadInTime ?? 0, 1500);
-    this.startTime = Math.min(0, this.firstObjectTime - leadIn - 600) - this.beatmap.audioLeadIn;
-    // Allow skipping long intros (SkipOverlay).
-    const skipTo = this.firstObjectTime - leadIn - 400;
-    this.skipTarget = skipTo - this.startTime > 2500 ? skipTo : null;
+    // DrawableRuleset.GameplayStartTime and MasterGameplayClockContainer.findEarliestStartTime.
+    this.gameplayStart = gameplayStartTime(this.ruleset.shortName, this.firstObjectTime, this.ruleset.shortName === 'osu' ? (this.drawable.leadInTime ?? 0) : 0);
+    this.startTime = findEarliestStartTime(this.gameplayStart, this.firstObjectTime, this.beatmap.audioLeadIn, this.storyboard?.earliestEventTime ?? null);
+    this.breakTracker = new BreakTracker(this.gameplayStart, this.playable.breaks);
 
     this.clock = new GameplayClock(this.track, this.mods.rate);
     this.clock.offset = settings.get('audio.offset', 0) + (settings.get('audio.compensateLatency', true) ? this.audio.outputLatency : 0);
     this.clock.seek(this.startTime);
+    this.lastFrameGameTime = this.startTime;
 
     this.loaded = true;
-    this.loaderEl.style.opacity = '0';
-    this.loaderEl.style.pointerEvents = 'none';
-    setTimeout(() => (this.loaderEl.style.display = 'none'), 500);
-    this.resize();
-    this.lastFrameReal = performance.now();
-    this.clock.start();
-    this.gameplayStarted = true;
-    this.raf = requestAnimationFrame(this.frame);
+    this.loader.setLoading(false);
   }
 
   private collectSampleLookups(): Set<string> {
@@ -232,15 +330,16 @@ export class PlayerScreen extends Screen {
         if (this.scoreProcessor.maximumAchievableAccuracy < minimum) hp.triggerFailure();
       });
     }
+  }
 
-    // Hit windows for the hit error meter.
-    const withWindows = (p.hitObjects as { hitWindows?: HitWindows | null }[]).find(o => o && o.hitWindows && typeof o.hitWindows.getAllAvailableWindows === 'function');
-    if (withWindows?.hitWindows) {
-      try {
-        this.hitWindows = withWindows.hitWindows.getAllAvailableWindows().filter(w => w.result !== HitResult.Miss && w.length > 0);
-      } catch {
-        this.hitWindows = [];
-      }
+  /** DrawableRuleset.FirstAvailableHitWindows → the windows shown by the hit error meter. */
+  private hitWindows(): { result: HitResult; length: number }[] {
+    const withWindows = (this.playable.hitObjects as { hitWindows?: HitWindows | null }[]).find(o => o && o.hitWindows && typeof o.hitWindows.getAllAvailableWindows === 'function');
+    if (!withWindows?.hitWindows) return [];
+    try {
+      return withWindows.hitWindows.getAllAvailableWindows().filter(w => w.result !== HitResult.Miss && w.length > 0);
+    } catch {
+      return [];
     }
   }
 
@@ -258,6 +357,7 @@ export class PlayerScreen extends Screen {
     c.addEventListener('contextmenu', e => e.preventDefault());
     window.addEventListener('resize', this.resize);
     window.addEventListener('blur', this.onBlur);
+    window.addEventListener('focus', this.onFocus);
     document.addEventListener('visibilitychange', this.onBlur);
   }
 
@@ -268,10 +368,11 @@ export class PlayerScreen extends Screen {
       mods: this.mods,
       skin,
       settings: { get: <T,>(key: string, fallback: T) => settings.get<T>(key, fallback) },
-      autoplay: this.mods.isAutoplay,
+      autoplay: this.autoplayInternal,
       rate: this.mods.rate,
       applyResult: (r: JudgementResult) => this.applyResult(r),
       playSamples: (samples, opts) => {
+        this.storyboard?.onSamplesPlayed?.(samples);
         for (const s of samples) this.playSample(s, opts?.pan ?? 0, opts?.volume ?? 1, opts?.rate ?? 1);
       },
       startLoop: (sample, opts) => this.startLoop(sample, opts?.pan ?? 0, opts?.volume ?? 1),
@@ -285,30 +386,44 @@ export class PlayerScreen extends Screen {
     };
   }
 
+  /** As in lazer: beatmap samples first, then each skin across all lookup names, then the default samples. */
   private resolveSample(s: HitSampleInfo): AudioBuffer | null {
     for (const name of s.lookupNames) {
-      if (name.startsWith('beatmap:')) {
-        if (this.working.isSilenced(name)) return null;
-        const b = this.sampleResolver(name);
-        if (b) return b;
-        continue;
-      }
+      if (!name.startsWith('beatmap:')) continue;
+      if (this.working.isSilenced(name)) return null;
+      const b = this.sampleResolver(name);
+      if (b) return b;
+    }
+    const sk = resolveSkinHitSample(this.skins, s, undefined, this.ruleset.shortName === 'taiko' ? 'taiko-' : undefined);
+    if (sk) return sk;
+    for (const name of s.lookupNames) {
+      if (name.startsWith('beatmap:')) continue;
       const plain = name.startsWith('Gameplay/') ? name.slice('Gameplay/'.length) : name;
-      for (const skin of this.skins) {
-        const sk = skin.getSample(plain);
-        if (sk) return sk;
-      }
       const d = this.audio.getDefaultSample(plain);
       if (d) return d;
     }
     return null;
   }
 
+  /** SkinnableSound for non-hitobject gameplay samples (combobreak, failsound, pause-loop, ...): skin first, then a default. */
+  private gameplaySample(skinName: string, fallback?: string): AudioBuffer | null {
+    for (const skin of this.skins) {
+      const b = skin.getSample(skinName);
+      if (b) return b;
+    }
+    return (this.audio?.getDefaultSample(fallback ?? skinName) ?? null) as AudioBuffer | null;
+  }
+
+  private playGameplaySample(skinName: string, fallback?: string, volume = 1, rate = 1): void {
+    const b = this.audio ? this.gameplaySample(skinName, fallback) : null;
+    if (b) this.audio.play(b, { volume: volume * this.holdVolume, rate });
+  }
+
   private playSample(s: HitSampleInfo, pan: number, volume: number, rate = 1): void {
     const buffer = this.resolveSample(s);
     if (!buffer) return;
     const v = (s.volume > 0 ? s.volume : 100) / 100;
-    this.audio.play(buffer, { pan, volume: v * volume, rate });
+    this.audio.play(buffer, { pan, volume: v * volume * this.holdVolume, rate });
   }
 
   private startLoop(s: HitSampleInfo, pan: number, volume: number): LoopHandle | null {
@@ -333,38 +448,82 @@ export class PlayerScreen extends Screen {
   private applyResult(r: JudgementResult): void {
     if (this.failed) return;
     const comboBefore = this.scoreProcessor.combo;
+    const healthBefore = this.healthProcessor.health;
     r.gameplayRate = this.mods.rate;
-    this.scoreProcessor.applyResult(r);
     this.healthProcessor.applyResult(r);
+    this.scoreProcessor.applyResult(r);
+    this.storyboard?.onJudgement?.(r);
 
-    if (this.scoreProcessor.combo > comboBefore) this.comboPop = 1;
-    if (breaksCombo(r.type) && comboBefore >= 20 && settings.get('gameplay.comboBreakSound', true)) this.game.playUiSample('combobreak', 0.8);
-
-    if (isBasic(r.judgement.maxResult) && isHit(r.type) && r.type !== HitResult.IgnoreHit) {
-      this.hitErrors.push({ offset: r.timeOffset, time: this.lastFrameGameTime, result: r.type });
-      if (this.hitErrors.length > 40) this.hitErrors.shift();
+    // ComboEffects: combobreak when the combo resets from above 20, or on the first break when AlwaysPlayFirstComboBreak is set.
+    const combo = this.scoreProcessor.combo;
+    if (combo !== comboBefore && combo === 0 && comboBefore > 0) {
+      if (comboBefore > 20 || (settings.get('gameplay.alwaysPlayFirstComboBreak', true) && this.firstComboBreakTime == null)) {
+        this.firstComboBreakTime = this.lastFrameGameTime;
+        if (settings.get('gameplay.comboBreakSound', true)) this.playGameplaySample('combobreak');
+      }
     }
+
+    const hw = (r.hitObject as { hitWindows?: HitWindows | null } | null)?.hitWindows;
+    const missWindowZero = hw && typeof hw.windowFor === 'function' ? hw.windowFor(HitResult.Miss) === 0 : !isBasic(r.judgement.maxResult);
+    this.hud?.onJudgement(
+      {
+        isHit: isHit(r.type),
+        type: r.type,
+        timeOffset: r.timeOffset,
+        ignoreHit: r.type === HitResult.IgnoreHit,
+        scorable: isScorable(r.type),
+        bonus: isBonus(r.type),
+        missWindowZero,
+        healthIncrease: this.healthProcessor.health - healthBefore,
+      },
+      performance.now(),
+    );
   }
 
   private onFail(): void {
-    if (this.failed || this.healthProcessor.noFail) return;
+    if (this.failed || this.healthProcessor.noFail || this.hasQuit) return;
     // ModEasyWithExtraLives (osu! and osu!catch; TaikoModEasy has no extra lives, ManiaHealthProcessor handles its own).
     const hasExtraLives = this.ruleset.shortName === 'osu' || this.ruleset.shortName === 'fruits';
     if (hasExtraLives && this.mods.has('EZ') && this.easyLives > 0 && !this.mods.has('SD') && !this.mods.has('PF')) {
-      // ModEasy: extra lives.
       this.easyLives--;
       this.healthProcessor.failed = false;
       this.healthProcessor.health = 1;
       return;
     }
+    if (this.replay) {
+      // ReplayPlayer: replays may only fail once their frames are exhausted, and show a fail indicator instead of the animation.
+      const last = this.replay.events[this.replay.events.length - 1]?.t ?? 0;
+      if (this.lastFrameGameTime < last) {
+        this.healthProcessor.failed = false;
+        return;
+      }
+      this.scoreProcessor.fail();
+      return;
+    }
+    this.performFail();
+  }
+
+  /** Player.PerformFail */
+  private performFail(): void {
     this.failed = true;
     this.scoreProcessor.fail();
-    this.failAnimationStart = performance.now();
-    this.game.playUiSample('fail', 0.8);
+    if (this.pauseMenu.visible) this.pauseMenu.hide();
+    this.cancelResume();
+    const now = performance.now();
+    this.failAnimation.start(now);
+    this.track.preservePitch = false;
+    this.playGameplaySample('failsound', 'fail', 0.8);
     for (const l of this.loops) l.stop();
-    setTimeout(() => {
-      if (!this.disposed) this.showFailOverlay();
-    }, 1600);
+    this.releaseAll();
+  }
+
+  /** FailAnimationContainer.OnComplete → Player.onFailComplete */
+  private onFailComplete(): void {
+    this.clock.stop();
+    this.paused = true;
+    this.el.classList.add('show-cursor');
+    this.failMenu.show(this.menuInfo());
+    this.startPauseLoop();
   }
 
   // ------------------------------------------------------------------ input handlers
@@ -376,14 +535,18 @@ export class PlayerScreen extends Screen {
   }
 
   private get inputBlocked(): boolean {
-    return !this.loaded || this.paused || this.failed || this.mods.isAutoplay || this.replay != null;
+    return !this.gameplayStarted || this.paused || this.failed || this.autoplayInternal || this.playback != null;
+  }
+
+  private actionIndex(action: string): number {
+    return this.actions.findIndex(a => a.id === action);
   }
 
   private press(action: string, time: number): void {
     const held = this.heldActions.get(action) ?? 0;
     this.heldActions.set(action, held + 1);
     if (held === 0) {
-      this.actionCounts.set(action, (this.actionCounts.get(action) ?? 0) + 1);
+      this.hud?.keyCounter.activate(this.actionIndex(action), performance.now());
       this.recorder?.press(time, action);
       this.drawable.onPressed(action, time);
     }
@@ -394,6 +557,7 @@ export class PlayerScreen extends Screen {
     if (held <= 0) return;
     this.heldActions.set(action, held - 1);
     if (held === 1) {
+      this.hud?.keyCounter.deactivate(this.actionIndex(action), performance.now());
       this.recorder?.release(time, action);
       this.drawable.onReleased(action, time);
     }
@@ -402,6 +566,7 @@ export class PlayerScreen extends Screen {
   private releaseAll(): void {
     for (const [action, n] of this.heldActions)
       if (n > 0) {
+        this.hud?.keyCounter.deactivate(this.actionIndex(action), performance.now());
         this.recorder?.release(this.lastFrameGameTime, action);
         this.drawable?.onReleased(action, this.lastFrameGameTime);
       }
@@ -409,30 +574,42 @@ export class PlayerScreen extends Screen {
   }
 
   onKeyDown(e: KeyboardEvent): boolean {
-    if (!this.loaded) return false;
-    if (e.code === 'Backquote' && !e.repeat) {
-      this.retry();
+    if (!this.gameplayStarted) return false;
+    const now = performance.now();
+    // HotkeyExitOverlay (Ctrl+Tilde) / HotkeyRetryOverlay (Tilde, Ctrl+R).
+    if (e.code === 'Backquote' && e.ctrlKey) {
+      if (!e.repeat) this.exitOverlay.hold.begin(now);
       return true;
     }
-    if (this.paused || this.failed) {
-      const target = this.pauseOverlay?.querySelector('.resume-target.hover') as HTMLButtonElement | null;
-      if (target && this.bindings.has(e.code)) {
-        target.click();
+    if ((e.code === 'Backquote' && !e.ctrlKey) || (e.code === 'KeyR' && e.ctrlKey)) {
+      if (!e.repeat) this.retryOverlay.hold.begin(now);
+      return true;
+    }
+    // HUDOverlay: Shift+Tab toggles the in-game interface; Control is held for the HUD.
+    if (e.code === 'Tab' && e.shiftKey) {
+      if (!e.repeat && this.hud) settings.set('gameplay.hudVisibilityMode', this.hud.cycleMode());
+      return true;
+    }
+    if ((e.code === 'ControlLeft' || e.code === 'ControlRight') && this.hud && !e.repeat) this.hud.holdingForHUD = true;
+
+    const menu = this.pauseMenu.visible ? this.pauseMenu : this.failMenu.visible ? this.failMenu : null;
+    if (menu) return menu.onKey(e.code);
+
+    if (this.osuResume.visible) {
+      const action = this.bindings.get(e.code);
+      if (action && !e.repeat && (action === 'LeftButton' || action === 'RightButton')) this.osuResume.tryResumeFromAction();
+      return !!action;
+    }
+    if (this.paused && !this.replayPaused) return false;
+
+    // SkipCutscene (Space) takes priority while a skip is available.
+    if (e.code === 'Space' && !e.repeat) {
+      if (this.skipIntro?.click() || this.skipOutro?.click()) return true;
+      // ReplayPlayer: TogglePauseReplay.
+      if (this.playback && !this.autoplayInternal) {
+        this.toggleReplayPause();
         return true;
       }
-      if (e.code === 'Enter' && this.pauseOverlay) {
-        (this.pauseOverlay.querySelector('.btn') as HTMLButtonElement | null)?.click();
-        return true;
-      }
-      return false;
-    }
-    if (e.code === 'Space' && this.skipTarget != null && !this.bindings.has('Space') && !e.repeat) {
-      this.skip();
-      return true;
-    }
-    if (e.code === 'Space' && this.skipTarget != null && this.lastFrameGameTime < this.skipTarget && this.bindings.has('Space') && !e.repeat) {
-      this.skip();
-      return true;
     }
     const action = this.bindings.get(e.code);
     if (action) {
@@ -443,8 +620,14 @@ export class PlayerScreen extends Screen {
   }
 
   onKeyUp(e: KeyboardEvent): boolean {
+    const now = performance.now();
+    if (e.code === 'Backquote' || e.code === 'KeyR' || e.code === 'ControlLeft' || e.code === 'ControlRight') {
+      this.retryOverlay.hold.abort(now);
+      this.exitOverlay.hold.abort(now);
+    }
+    if ((e.code === 'ControlLeft' || e.code === 'ControlRight') && this.hud) this.hud.holdingForHUD = false;
     const action = this.bindings.get(e.code);
-    if (action && this.loaded && !this.mods.isAutoplay && !this.replay) {
+    if (action && this.gameplayStarted && !this.autoplayInternal && !this.playback) {
       this.release(action, this.eventTime(e.timeStamp));
       return true;
     }
@@ -457,6 +640,16 @@ export class PlayerScreen extends Screen {
   }
 
   private onPointerDown = (e: PointerEvent): void => {
+    const now = performance.now();
+    this.holdForMenu.setTouchActive(e.pointerType === 'touch' || e.pointerType === 'pen', now);
+    // GlobalAction.PauseGameplay (middle mouse) / TogglePauseReplay.
+    if (e.button === 1 && e.pointerType === 'mouse') {
+      e.preventDefault();
+      if (this.pauseMenu.visible) this.pauseMenu.pauseGameplayAction();
+      else if (this.playback && !this.autoplayInternal) this.toggleReplayPause();
+      else if (!this.playback && !this.failed) this.performExitWithConfirmation();
+      return;
+    }
     if (this.inputBlocked) return;
     e.preventDefault();
     const p = this.localPos(e);
@@ -476,7 +669,9 @@ export class PlayerScreen extends Screen {
   };
 
   private onPointerMove = (e: PointerEvent): void => {
-    if (!this.loaded || this.paused || this.replay) return;
+    if (e.pointerType === 'mouse' && (e.movementX !== 0 || e.movementY !== 0)) this.holdForMenu.setTouchActive(false, performance.now());
+    if (e.pointerType === 'mouse') this.hud?.setPointer(this.localPos(e));
+    if (!this.gameplayStarted || this.paused || this.playback || this.failed) return;
     const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [e];
     for (const ev of events.length > 0 ? events : [e]) {
       const p = this.localPos(ev);
@@ -493,7 +688,7 @@ export class PlayerScreen extends Screen {
   };
 
   private onPointerUp = (e: PointerEvent): void => {
-    if (!this.loaded || this.replay) return;
+    if (!this.gameplayStarted || this.playback) return;
     const p = this.localPos(e);
     const t = this.eventTime(e.timeStamp);
     if (e.pointerType === 'touch' || e.pointerType === 'pen') {
@@ -528,7 +723,7 @@ export class PlayerScreen extends Screen {
 
   /** Feeds replay events up to `time` into the ruleset. */
   private playReplayTo(time: number): void {
-    const replay = this.replay;
+    const replay = this.playback;
     if (!replay) return;
     const ev = replay.events;
     while (this.replayIndex < ev.length && ev[this.replayIndex].t <= time) {
@@ -564,10 +759,23 @@ export class PlayerScreen extends Screen {
     }
   }
 
-  private onBlur = (): void => {
-    if (document.visibilityState === 'hidden' || !document.hasFocus()) {
-      if (this.loaded && !this.paused && !this.failed && !this.resultsShown && !this.mods.isAutoplay && !this.replay) this.pause();
+  private toggleReplayPause(): void {
+    if (this.failed || this.resultsShown) return;
+    this.replayPaused = !this.replayPaused;
+    this.paused = this.replayPaused;
+    if (this.replayPaused) this.clock.stop();
+    else {
+      this.lastFrameReal = performance.now();
+      this.clock.start();
     }
+  }
+
+  private onBlur = (): void => {
+    if (document.visibilityState === 'hidden' || !document.hasFocus()) this.focusLost = true;
+  };
+
+  private onFocus = (): void => {
+    this.focusLost = false;
   };
 
   private resize = (): void => {
@@ -578,133 +786,252 @@ export class PlayerScreen extends Screen {
     this.canvas.height = Math.round(hgt * dpr);
     this.viewW = w;
     this.viewH = hgt;
+    this.dpr = dpr;
   };
 
   // ------------------------------------------------------------------ flow
 
-  private skip(): void {
-    if (this.skipTarget == null || !this.loaded) return;
-    if (this.lastFrameGameTime < this.skipTarget) {
-      this.clock.seek(this.skipTarget);
-      this.lastFrameGameTime = this.skipTarget;
-      this.clock.stop();
-      this.clock.start();
+  /** Player.OnEntering + StartGameplay (the PlayerLoader pushing the loaded player). */
+  private startGameplay(now: number): void {
+    this.gameplayStarted = true;
+    this.loader.contentOut();
+    setTimeout(() => this.loader.el.remove(), 700);
+    // PlayerLoader.OnSuspending: the (preview) track is stopped; ContentOut restores the low pass over 300ms.
+    this.game.stopPreview();
+    this.previewStopped = true;
+    this.lowPass.to(Math.min(22049, this.audio.ctx.sampleRate / 2), 300, Easing.None, now);
+    this.el.classList.remove('player-loading');
+    this.canvas.style.visibility = '';
+    this.game.setBackgroundDim(1, 0);
+    this.resize();
+    this.enteredAt = now;
+    this.bgDim.set(0.2, now);
+
+    const cinema = this.mods.has('CN');
+    const hudMode = settings.get<HUDVisibilityMode | null>('gameplay.hudVisibilityMode', null) ?? (settings.get('gameplay.showHud', true) ? 'always' : 'never');
+    this.hud = new HUDOverlay(
+      {
+        rulesetShortName: this.ruleset.shortName,
+        mods: this.mods,
+        actionCount: this.actions.length,
+        hitWindows: this.hitWindows(),
+        objectTimes: [...this.playable.objectTimes].sort((a, b) => a.start - b.start),
+        replayLoaded: this.playback != null || this.autoplayInternal,
+        drainingHealth: this.healthProcessor instanceof DrainingHealthProcessor,
+        initialHealth: this.healthProcessor.health,
+        showHealthBar: !this.mods.has('NF') || settings.get('gameplay.showHealthDisplayWhenCantFail', true),
+      },
+      now,
+      hudMode,
+    );
+    this.hud.keyCounter.isCounting = false;
+    if (cinema) {
+      this.hud.setShowHud(false, now);
+      this.hud.showHudDisabled = true;
+      this.breakOverlay.hidden = true;
     }
-    this.skipTarget = null;
-    this.skipButton.style.display = 'none';
+    if (this.playback || this.autoplayInternal) {
+      this.replayLabel.textContent = this.replay ? `Watching ${this.replay.player} play ${this.working.entry.title}` : 'AUTOPLAY';
+      this.replayLabel.style.display = cinema ? 'none' : '';
+    }
+
+    // SkipOverlay (intro) and the storyboard outro skip.
+    this.skipIntro = new SkipOverlay(this.gameplayStart);
+    this.skipIntro.requestSkip = () => this.performIntroSkip();
+    this.skipIntro.playConfirm = () => this.game.playUiSample('menu-confirm', 0.8);
+    this.el.insertBefore(this.skipIntro.el, this.holdForMenu.el);
+    if (!this.skipIntro.load(this.startTime, now) || cinema) this.skipIntro.expire();
+    const latest = this.storyboard?.latestEventTime ?? null;
+    if (latest != null && !cinema) {
+      this.skipOutro = new SkipOverlay(latest);
+      this.skipOutro.requestSkip = () => this.progressToResults(false);
+      this.el.insertBefore(this.skipOutro.el, this.holdForMenu.el);
+      if (!this.skipOutro.load(this.startTime, now, false)) this.skipOutro = null;
+    }
+
+    // GameplayClockContainer.Reset(startClock: true)
+    this.clock.seek(this.startTime);
+    this.lastFrameGameTime = this.startTime;
+    this.lastFrameReal = now;
+    this.paused = false;
+    this.clock.start();
+    // PlayerConfiguration.AutomaticallySkipIntro |= QuickRestart → SkipOverlay.SkipWhenReady
+    if (this.restart?.quick) {
+      this.autoSkipQueued = true;
+      this.nextAutoSkipAt = now + 200;
+    }
   }
 
-  private pause(): void {
-    if (this.paused || this.failed || !this.loaded) return;
+  private performIntroSkip(): void {
+    const target = skipTarget(this.clock.currentTime, this.gameplayStart, this.startTime);
+    if (target == null) return;
+    const wasRunning = !this.paused;
+    this.clock.stop();
+    this.clock.seek(target);
+    this.lastFrameGameTime = target;
+    if (wasRunning) this.clock.start();
+  }
+
+  private get pausingSupportedByCurrentState(): boolean {
+    return this.loaded && this.gameplayStarted && !this.hasPassed && this.playback == null && !this.autoplayInternal && !this.failed;
+  }
+
+  private get localUserPlaying(): boolean {
+    return this.playback == null && !this.autoplayInternal && !this.hasPassed && !this.failed && !(this.breakTracker?.isBreakTime || this.paused);
+  }
+
+  private get pauseCooldownActive(): boolean {
+    return this.localUserPlaying && this.lastPauseActionTime != null && this.clock.currentTime < this.lastPauseActionTime + PAUSE_COOLDOWN_DURATION;
+  }
+
+  /** Player.Pause */
+  private pause(): boolean {
+    if (!this.pausingSupportedByCurrentState) return false;
+    if (!this.isResuming && this.pauseCooldownActive) return false;
+    if (this.isResuming) this.cancelResume();
     this.paused = true;
     this.clock.stop();
     this.releaseAll();
     for (const l of this.loops) l.setVolume(0);
     this.el.classList.add('show-cursor');
-    this.showPauseOverlay();
+    this.pauseMenu.show(this.menuInfo());
+    this.startPauseLoop();
+    this.lastPauseActionTime = this.clock.currentTime;
+    return true;
   }
 
-  /** Last pointer position (CSS px), used by the osu! resume overlay. */
-  private lastPointer: { x: number; y: number } | null = null;
+  private menuInfo(): { retries: number; progress: number | null; accuracy: string } {
+    const length = this.lastObjectTime - this.firstObjectTime;
+    const progress = length === 0 ? 0 : Math.floor(Math.max(0, Math.min(1, (this.clock.currentTime - this.firstObjectTime) / length)) * 100);
+    return { retries: this.restart?.restartCount ?? 0, progress, accuracy: formatAccuracy(this.scoreProcessor.accuracy) };
+  }
 
-  /**
-   * OsuResumeOverlay: in osu!, gameplay only resumes once the cursor is clicked where it was when pausing,
-   * so pausing can't be used to reposition the cursor. Other rulesets resume immediately.
-   */
-  private requestResume(): void {
-    if (this.ruleset.shortName !== 'osu' || !this.lastPointer || this.mods.has('AP') || this.mods.has('RX')) {
-      this.resume();
+  private startPauseLoop(): void {
+    this.stopPauseLoop();
+    const b = this.gameplaySample('pause-loop');
+    if (b && this.audio) this.pauseLoop = this.audio.loop(b, { volume: 1 });
+  }
+
+  private stopPauseLoop(): void {
+    this.pauseLoop?.stop();
+    this.pauseLoop = null;
+  }
+
+  /** Player.Resume */
+  private resume(): void {
+    if (!this.paused || this.failed || this.isResuming) return;
+    this.isResuming = true;
+    this.pauseMenu.hide();
+    this.stopPauseLoop();
+    // breaks and time-based conditions may allow instant resume.
+    if (this.breakTracker.isBreakTime) {
+      this.completeResume();
       return;
     }
-    this.closePauseOverlay();
-    const p = this.lastPointer;
-    const target = h(
-      'button',
-      {
-        class: 'resume-target',
-        style: { left: `${p.x}px`, top: `${p.y}px` },
-        title: 'Click to resume',
-        onclick: () => this.resume(),
-      },
-    );
-    const el = h('div', { class: 'overlay', style: { background: 'rgba(0,0,0,0.35)' } }, h('div', { class: 'resume-hint' }, 'Click the circle to resume'), target);
-    // Keyboard hit keys also resume while hovering the target (like lazer).
-    target.addEventListener('pointerenter', () => target.classList.add('hover'));
-    target.addEventListener('pointerleave', () => target.classList.remove('hover'));
-    this.pauseOverlay = el;
-    this.el.appendChild(el);
+    // DrawableRuleset.RequestResume: OsuResumeOverlay (osu!, unless Autopilot / Touch Device) or DelayedResumeOverlay.
+    const now = performance.now();
+    if (this.ruleset.shortName === 'osu' && !this.mods.has('AP') && !this.mods.has('TD')) {
+      const p = this.lastPointer;
+      // Can't display if the cursor is outside the window.
+      if (!p || p.x < 0 || p.y < 0 || p.x > this.viewW || p.y > this.viewH) {
+        this.completeResume();
+        return;
+      }
+      this.osuResume.show(p.x, p.y);
+      return;
+    }
+    const scale = this.ruleset.shortName === 'fruits' || this.ruleset.shortName === 'osu' ? 0.65 : 1;
+    this.delayedResume = new DelayedResumeOverlay(scale);
+    this.delayedResume.onResume = () => this.completeResume();
+    this.delayedResume.onCount = count => this.game.playUiSample('menu-click', count === 0 ? 0.4 : 0.6);
+    this.delayedResume.show(now);
   }
 
-  private resume(): void {
+  private completeResume(): void {
     if (!this.paused) return;
+    this.isResuming = false;
+    this.osuResume.hide();
     this.paused = false;
-    this.closePauseOverlay();
     this.el.classList.remove('show-cursor');
     this.lastFrameReal = performance.now();
     this.clock.start();
   }
 
+  private cancelResume(): void {
+    if (!this.isResuming) return;
+    this.isResuming = false;
+    this.osuResume.hide();
+    this.delayedResume?.hide(performance.now());
+  }
+
   onBack(): boolean {
-    if (!this.loaded) return true;
+    if (!this.gameplayStarted) return true;
     if (this.resultsShown) return true;
-    if (this.failed) return true;
-    if (this.paused) {
-      if (this.pauseOverlay?.querySelector('.resume-target')) this.showPauseOverlay();
-      else this.requestResume();
+    const menu = this.pauseMenu.visible ? this.pauseMenu : this.failMenu.visible ? this.failMenu : null;
+    if (menu) {
+      menu.back();
       return false;
     }
-    if (this.mods.isAutoplay || this.replay) return true;
-    this.pause();
+    // HoldForMenuButton: GlobalAction.Back confirms immediately (not a dangerous action, AlwaysRequireHoldingForPause off).
+    this.holdForMenu.hold.confirm();
     return false;
   }
 
-  private retry(): void {
-    this.game.replace(new PlayerScreen(this.game, this.working, this.ruleset, this.mods, this.replay));
+  /** Player.PerformExitWithConfirmation */
+  private performExitWithConfirmation(): boolean {
+    const dialogVisible = this.pauseMenu.visible || this.failMenu.visible;
+    if (!dialogVisible) {
+      // if the fail animation is currently in progress, accelerate it (it will show the fail dialog on completion).
+      if (!this.hasPassed && this.failed) {
+        this.failAnimation.finishNow(performance.now());
+        return false;
+      }
+      if (this.pausingSupportedByCurrentState) {
+        this.pause();
+        return false;
+      }
+    }
+    return this.performExit();
   }
 
-  private quit(): void {
-    this.game.pop();
+  /** Player.PerformExit */
+  private performExit(): boolean {
+    // Matching osu!stable behaviour, if the results screen is pending and the user requests an exit, show the results instead.
+    if (this.hasPassed && !this.isRestarting) {
+      this.progressToResults(false);
+      return false;
+    }
+    if (!this.hasPassed && !this.failed) this.hasQuit = true;
+    if (this.game.currentScreen === this) this.game.pop();
+    return true;
   }
 
-  private showPauseOverlay(): void {
-    this.closePauseOverlay();
-    const el = h(
-      'div',
-      { class: 'overlay center' },
-      h(
-        'div',
-        { class: 'pause-menu' },
-        h('h2', null, 'Paused'),
-        h('button', { class: 'btn primary', onclick: () => this.requestResume() }, 'Continue'),
-        h('button', { class: 'btn', onclick: () => this.retry() }, 'Retry'),
-        h('button', { class: 'btn danger', onclick: () => this.quit() }, 'Quit'),
-      ),
-    );
-    this.pauseOverlay = el;
-    this.el.appendChild(el);
+  /** Player.Restart → PlayerLoader.prepareForRestart. */
+  private retry(quick: boolean): void {
+    if (this.isRestarting || this.disposed) return;
+    this.isRestarting = true;
+    this.track?.stop();
+    this.game.replace(new PlayerScreen(this.game, this.working, this.ruleset, this.mods, this.replay, { restartCount: (this.restart?.restartCount ?? 0) + 1, quick }));
   }
 
-  private showFailOverlay(): void {
-    this.closePauseOverlay();
-    this.el.classList.add('show-cursor');
-    const el = h(
-      'div',
-      { class: 'overlay center' },
-      h(
-        'div',
-        { class: 'pause-menu' },
-        h('h2', { style: { color: 'var(--red)' } }, 'Failed'),
-        h('button', { class: 'btn primary', onclick: () => this.retry() }, 'Retry'),
-        h('button', { class: 'btn danger', onclick: () => this.quit() }, 'Quit'),
-      ),
-    );
-    this.pauseOverlay = el;
-    this.el.appendChild(el);
+  /** Player.checkScoreCompleted */
+  private checkScoreCompleted(now: number): void {
+    if (this.failed) return;
+    this.hasPassed = true;
+    this.cancelResume();
+    const sb = this.storyboard;
+    const storyboardStillRunning = sb != null && sb.latestEventTime != null && this.currentDim() < 1 && this.clock.currentTime < sb.latestEventTime;
+    if (storyboardStillRunning && this.skipOutro) {
+      this.skipOutro.show(now);
+      return;
+    }
+    this.progressToResults(true);
   }
 
-  private closePauseOverlay(): void {
-    this.pauseOverlay?.remove();
-    this.pauseOverlay = null;
+  private progressToResults(withDelay: boolean): void {
+    if (this.resultsShown) return;
+    const at = performance.now() + (withDelay ? RESULTS_DISPLAY_DELAY : 0);
+    this.resultsAt = this.resultsAt == null ? at : Math.min(this.resultsAt, at);
   }
 
   private showResults(): void {
@@ -725,7 +1052,7 @@ export class PlayerScreen extends Screen {
       maximumStatistics: new Map(sp.maximumStatistics),
       hitEvents: [...sp.hitEvents],
       date: Date.now(),
-      passed: !this.failed,
+      passed: !this.failed && !sp.failed,
       replay: this.recorder
         ? { rulesetId: this.ruleset.id, space: this.replaySpace, events: this.recorder.events, player: settings.get('ui.username', 'Guest'), mods: this.mods.list, modSettings: this.mods.settings }
         : this.replay,
@@ -739,12 +1066,15 @@ export class PlayerScreen extends Screen {
     cancelAnimationFrame(this.raf);
     window.removeEventListener('resize', this.resize);
     window.removeEventListener('blur', this.onBlur);
+    window.removeEventListener('focus', this.onFocus);
     document.removeEventListener('visibilitychange', this.onBlur);
     for (const l of this.loops) l.stop();
+    this.stopPauseLoop();
+    if (this.audio) this.audio.musicFilter.frequency.value = this.audio.ctx.sampleRate / 2;
     this.drawable?.dispose?.();
     this.storyboard?.dispose();
     this.track?.dispose();
-    if (this.gameplayStarted && !this.resultsShown) void this.game.startPreview();
+    if (this.previewStopped && !this.resultsShown && !this.isRestarting) void this.game.startPreview();
   }
 
   // ------------------------------------------------------------------ frame loop
@@ -753,42 +1083,116 @@ export class PlayerScreen extends Screen {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.frame);
     const now = performance.now();
+    if (this.audio) this.audio.musicFilter.frequency.value = this.failAnimation.started ? this.failAnimation.lowPassCutoff(now, this.audio.ctx.sampleRate) : this.lowPass.valueAt(now);
 
-    if (this.failed) {
-      // Fail animation: slow the track down like FailAnimation.
-      const t = Math.min(1, (now - this.failAnimationStart) / 1500);
-      // Browsers only support playback rates down to 0.0625.
-      this.track.rate = Math.max(0.1, this.mods.rate * (1 - t));
-      this.track.volume = Math.max(0, 1 - t);
-      if (t >= 1) this.track.stop();
+    if (!this.gameplayStarted) {
+      this.loaderFrame(now);
+      return;
     }
+    const realElapsed = now - this.lastFrameReal;
+
+    // Hotkey overlays (volume ducking follows their progress).
+    const retryVolume = this.retryOverlay.update(now);
+    const exitVolume = this.exitOverlay.update(now);
+    this.holdVolume = Math.min(retryVolume, exitVolume);
+    this.holdForMenu.update(now);
+
+    // FailAnimationContainer: track frequency → 0 (the gameplay clock follows), volume 0.5.
+    let trackVolume = this.holdVolume;
+    if (this.failAnimation.started) {
+      const freq = this.failAnimation.trackFrequency(now);
+      this.clock.rate = this.mods.rate * freq;
+      const r = this.mods.rate * freq;
+      if (r < 0.07) this.track.stop();
+      else this.track.rate = r;
+      trackVolume *= 0.5;
+      if (this.failAnimation.update(now)) this.onFailComplete();
+    }
+    this.track.volume = trackVolume;
 
     let elapsed = 0;
-    if (!this.paused && !this.failed) elapsed = this.clock.update();
+    if (!this.paused) elapsed = this.clock.update();
     const time = this.clock.currentTime;
     this.lastFrameReal = now;
     this.lastFrameGameTime = time;
 
-    if (!this.paused && !this.failed) {
+    if (!this.paused) {
       this.playReplayTo(time);
       this.drawable.update(time, elapsed);
-      this.healthProcessor.update(time, elapsed);
-      if (this.skipTarget != null) {
-        const showSkip = time < this.skipTarget;
-        this.skipButton.style.display = showSkip ? '' : 'none';
-        if (!showSkip) this.skipTarget = null;
-      }
-      if (this.completedAt == null && this.drawable.hasCompleted && time >= this.lastObjectTime) {
-        this.completedAt = time;
-        if (this.healthProcessor.checkFailAtEnd()) this.healthProcessor.triggerFailure();
-      }
-      if (this.completedAt != null && !this.failed && time - this.completedAt > COMPLETION_DELAY * this.mods.rate) this.showResults();
+      if (!this.failed) this.healthProcessor.update(time, elapsed);
     }
 
-    this.render(time);
+    // BreakTracker
+    const scoreCompleted = this.completed;
+    this.breakTracker.update(time, scoreCompleted);
+    if (this.breakTracker.currentPeriod) {
+      this.lastBreakPeriod = this.breakTracker.currentPeriod;
+      this.breakOverlay.setCurrentPeriod(this.breakTracker.currentPeriod);
+    }
+    this.breakOverlay.update(time, this.breakTracker.currentPeriod, realElapsed * (this.paused ? 0 : 1));
+    if (this.breakTracker.isBreakTime !== this.wasBreakTime) {
+      this.wasBreakTime = this.breakTracker.isBreakTime;
+      if (this.hud) this.hud.keyCounter.isCounting = !this.breakTracker.isBreakTime;
+    }
+
+    // Player.updatePauseOnFocusLostState (retried every frame until the pause cooldown allows it).
+    if (this.focusLost && !this.paused && !this.breakTracker.isBreakTime && this.pausingSupportedByCurrentState) this.pause();
+
+    // Skip overlays
+    this.skipIntro?.update(time, now, realElapsed);
+    this.skipOutro?.update(time, now, realElapsed);
+    if (this.autoSkipQueued && now >= this.nextAutoSkipAt) {
+      if (!this.skipIntro?.click()) this.autoSkipQueued = false;
+      else this.nextAutoSkipAt = now + 200;
+    }
+
+    // ScoreProcessor.HasCompleted → checkScoreCompleted
+    if (!this.paused && !this.completed && !this.failed && this.drawable.hasCompleted && time >= this.lastObjectTime) {
+      this.completed = true;
+      if (this.healthProcessor.checkFailAtEnd()) this.healthProcessor.triggerFailure();
+      this.checkScoreCompleted(now);
+    }
+    // Storyboard outro: progress once the storyboard has ended.
+    if (this.hasPassed && this.resultsAt == null && this.skipOutro && this.storyboard?.latestEventTime != null && time >= this.storyboard.latestEventTime) this.progressToResults(true);
+    if (this.resultsAt != null && now >= this.resultsAt && !this.failed) this.showResults();
+
+    // Resume overlays
+    this.delayedResume?.update(now);
+
+    // HUD
+    if (this.hud) {
+      this.hud.update(now, {
+        totalScore: this.scoreProcessor.totalScore,
+        accuracy: this.scoreProcessor.accuracy,
+        combo: this.scoreProcessor.combo,
+        health: this.healthProcessor.health,
+        time,
+        clockStartTime: this.startTime,
+        isPlaying: this.localUserPlaying,
+        keyOverlay: settings.get('gameplay.showKeyCounter', false),
+        fadePlayfieldWhenHealthLow: settings.get('gameplay.fadePlayfieldWhenHealthLow', true),
+        showHitErrorMeter: settings.get('gameplay.hitErrorMeter', true),
+      });
+    }
+
+    this.render(time, now);
   };
 
-  private render(time: number): void {
+  /** PlayerLoader.pushWhenLoaded (checked every frame after PlayerPushDelay). */
+  private loaderFrame(now: number): void {
+    if (this.pushAt == null) {
+      const ready = this.loaded && now >= this.loaderEnteredAt + this.loader.pushDelay && document.visibilityState === 'visible';
+      if (ready) this.pushAt = now + (this.restart?.quick && this.loader.contentHidden ? 0 : 500);
+    } else if (now >= this.pushAt) this.startGameplay(now);
+  }
+
+  private currentDim(): number {
+    if (this.mods.has('CN')) return 0; // ModCinema: IgnoreUserSettings → DimWhenUserSettingsIgnored (0)
+    const lighten = settings.get('gameplay.lightenDuringBreaks', true) && this.breakTracker.isBreakTime ? BREAK_LIGHTEN_AMOUNT : 0;
+    return Math.max(settings.get('gameplay.backgroundDim', 0.7) - lighten, 0);
+  }
+
+  private render(time: number, now: number): void {
     const g = this.g;
     const dpr = this.canvas.width / (this.canvas.clientWidth || 1);
     const w = this.canvas.width / dpr;
@@ -797,203 +1201,128 @@ export class PlayerScreen extends Screen {
     g.fillStyle = '#000';
     g.fillRect(0, 0, w, hgt);
 
-    const inBreak = this.playable.breaks.some(b => time >= b.startTime && time <= b.endTime && b.endTime - b.startTime >= 650);
+    // UserDimContainer: FadeColour(Gray(1 - DimLevel), 800, OutQuint) whenever the dim level changes.
+    const target = this.currentDim();
+    if (target !== this.bgDimTarget) {
+      this.bgDimTarget = target;
+      this.bgDim.to(target, BACKGROUND_FADE_DURATION, Easing.OutQuint, now);
+    }
+    const dim = this.bgDim.valueAt(now);
     const sbState = { passing: this.healthProcessor.health >= 0.5 || this.healthProcessor.noFail, running: !this.paused && !this.failed, rate: this.mods.rate };
-    // Background
+
+    // Background (BackgroundScreenBeatmap): dimmed here unless a storyboard is drawn (then a single dim is applied after it).
+    const failBg = this.failAnimation.backgroundColour(now);
     if (this.background && !this.storyboard?.replacesBackground) {
       const img = this.background;
       const s = Math.max(w / img.width, hgt / img.height);
       const iw = img.width * s;
       const ih = img.height * s;
       g.drawImage(img, (w - iw) / 2, (hgt - ih) / 2, iw, ih);
-      let dim = settings.get('gameplay.backgroundDim', 0.75);
-      if (inBreak || time < this.firstObjectTime - 1500) dim *= 0.7;
-      if (this.mods.has('CN')) dim = 0;
-      g.fillStyle = `rgba(0,0,0,${dim})`;
+      if (!this.storyboard) {
+        g.fillStyle = `rgba(0,0,0,${1 - (1 - dim) * failBg})`;
+        g.fillRect(0, 0, w, hgt);
+      }
+    }
+
+    // Player.OnEntering: ScaleTo(0.7) → 1 over 750 (OutQuint), Delay(250).FadeIn(250); GameplayClockContainer.FadeInFromZero(750, OutQuint).
+    const sinceEnter = now - this.enteredAt;
+    const enterScale = valueAt(sinceEnter, 0.7, 1, 750);
+    const enterAlpha = Math.max(0, Math.min(1, (sinceEnter - 250) / 250)) * valueAt(sinceEnter, 0, 1, 750);
+    const fail = this.failAnimation.contentTransform(now);
+
+    g.save();
+    g.globalAlpha = enterAlpha;
+    g.translate(w / 2, hgt / 2);
+    g.scale(enterScale * fail.scale, enterScale * fail.scale);
+    if (this.failAnimation.started) {
+      g.rotate((fail.rotation * Math.PI) / 180);
+      g.beginPath();
+      g.rect(-w / 2, -hgt / 2, w, hgt);
+      g.clip();
+    }
+    g.translate(-w / 2, -hgt / 2);
+    if (this.failAnimation.started) {
+      // Content.Masking + a black box behind the content.
+      g.fillStyle = '#000';
       g.fillRect(0, 0, w, hgt);
     }
 
+    // --- underlay: storyboard (dimmed), letterbox, kiai fountains
     if (this.storyboard) {
       g.save();
       this.storyboard.drawUnder(g, w, hgt, time, sbState);
       g.restore();
-      // Apply the background dim on top of the storyboard as well.
-      let dim = settings.get('gameplay.backgroundDim', 0.75);
-      if (inBreak || time < this.firstObjectTime - 1500) dim *= 0.7;
-      if (this.mods.has('CN')) dim = 0;
-      g.fillStyle = `rgba(0,0,0,${dim})`;
+      g.fillStyle = `rgba(0,0,0,${1 - (1 - dim) * failBg})`;
       g.fillRect(0, 0, w, hgt);
     }
+    if (this.beatmap.letterboxInBreaks) drawLetterbox(g, w, hgt, time, this.lastBreakPeriod);
+    this.fountains.update(now, time, this.playable.source.controlPoints.effectPointAt(time), settings.get('gameplay.starFountains', true));
+    this.fountains.draw(g, w, hgt, now);
 
-    if (this.mods.has('CN')) {
-      if (this.storyboard) this.storyboard.drawOver(g, w, hgt, time, sbState);
-      return;
+    // --- gameplay
+    if (!this.mods.has('CN')) {
+      if (this.failAnimation.started) {
+        // HitObjectContainer.FadeOut(duration / 2): rulesets set globalAlpha themselves, so composite their output instead.
+        const a = this.failAnimation.hitObjectAlpha(now);
+        if (a > 0) {
+          const off = (this.failCanvas ??= document.createElement('canvas'));
+          if (off.width !== this.canvas.width || off.height !== this.canvas.height) {
+            off.width = this.canvas.width;
+            off.height = this.canvas.height;
+          }
+          const og = off.getContext('2d')!;
+          og.setTransform(1, 0, 0, 1, 0, 0);
+          og.clearRect(0, 0, off.width, off.height);
+          og.setTransform(dpr, 0, 0, dpr, 0, 0);
+          this.drawable.render(og, w, hgt, time);
+          g.save();
+          g.globalAlpha *= a;
+          g.drawImage(off, 0, 0, w, hgt);
+          g.restore();
+        }
+      } else {
+        g.save();
+        this.drawable.render(g, w, hgt, time);
+        g.restore();
+      }
     }
 
-    g.save();
-    this.drawable.render(g, w, hgt, time);
-    g.restore();
-
+    // --- overlay components: storyboard overlay layer, HUD, break overlay, resume overlay
     if (this.storyboard) {
       g.save();
-      this.storyboard.drawOver(g, w, hgt, time, sbState);
+      this.storyboard.drawOver(g, w, hgt, time, { ...sbState, dim });
       g.restore();
     }
-
-    if (settings.get('gameplay.showHud', true)) this.drawHud(g, w, hgt, time, inBreak);
-    if (inBreak) this.drawBreak(g, w, hgt, time);
-  }
-
-  // ------------------------------------------------------------------ HUD
-
-  private drawHud(g: CanvasRenderingContext2D, w: number, hgt: number, time: number, inBreak: boolean): void {
-    const sp = this.scoreProcessor;
-    const font = '"Exo 2", system-ui, sans-serif';
-    const ui = Math.max(0.7, Math.min(1.3, Math.min(w, hgt) / 800));
-
-    // Rolling score counter.
-    this.displayedScore += (sp.totalScore - this.displayedScore) * 0.25;
-    if (Math.abs(sp.totalScore - this.displayedScore) < 1) this.displayedScore = sp.totalScore;
-
-    g.textBaseline = 'top';
-    g.textAlign = 'right';
-    g.fillStyle = '#fff';
-    g.font = `700 ${Math.round(38 * ui)}px ${font}`;
-    g.fillText(String(Math.round(this.displayedScore)).padStart(8, '0'), w - 16, 12);
-    g.font = `600 ${Math.round(22 * ui)}px ${font}`;
-    g.fillStyle = 'rgba(255,255,255,0.85)';
-    g.fillText(`${(sp.accuracy * 100).toFixed(2)}%`, w - 16, 12 + 44 * ui);
-
-    // Health bar (top-left).
-    const hp = this.healthProcessor.health;
-    const barW = Math.min(w * 0.4, 420);
-    g.fillStyle = 'rgba(0,0,0,0.4)';
-    roundRect(g, 16, 16, barW, 10 * ui, 5 * ui);
-    g.fill();
-    g.fillStyle = hp < 0.3 ? '#ff5a5a' : '#9b30ff';
-    roundRect(g, 16, 16, Math.max(0, barW * hp), 10 * ui, 5 * ui);
-    g.fill();
-
-    // Combo (bottom-left).
-    this.comboPop *= 0.85;
-    g.textAlign = 'left';
-    g.textBaseline = 'bottom';
-    g.font = `800 ${Math.round(46 * ui * (1 + this.comboPop * 0.12))}px ${font}`;
-    g.fillStyle = '#fff';
-    // osu!mania draws its combo inside the playfield (like lazer's mania skin layout).
-    if (this.ruleset.shortName !== 'mania') g.fillText(`${sp.combo}x`, 16, hgt - 22);
-
-    // Mods (top-right under accuracy).
-    if (!this.mods.isEmpty) {
-      g.font = `700 ${Math.round(14 * ui)}px ${font}`;
-      g.textAlign = 'right';
-      g.textBaseline = 'top';
-      g.fillStyle = 'rgba(255,255,255,0.7)';
-      g.fillText(this.mods.list.map(m => this.mods.label(m)).join(' '), w - 16, 12 + 74 * ui);
+    if (this.hud) {
+      this.hud.drawFailingLayer(g, w, hgt, now);
+      this.hud.draw(g, w, hgt, now, this.dpr);
     }
+    this.breakOverlay.draw(g, w, hgt, time, this.scoreProcessor.accuracy, this.scoreProcessor.rank, this.dpr);
+    this.delayedResume?.draw(g, w, hgt, now);
 
-    // Song progress (bottom bar).
-    const start = this.firstObjectTime;
-    const end = this.lastObjectTime;
-    const progress = Math.max(0, Math.min(1, (time - start) / Math.max(1, end - start)));
-    g.fillStyle = 'rgba(255,255,255,0.12)';
-    g.fillRect(0, hgt - 5, w, 5);
-    g.fillStyle = time < start ? 'rgba(102,204,255,0.8)' : 'rgba(255,255,255,0.85)';
-    g.fillRect(0, hgt - 5, w * (time < start ? Math.max(0, 1 - (start - time) / Math.max(1, start - this.startTime)) : progress), 5);
-    g.font = `600 ${Math.round(13 * ui)}px ${font}`;
-    g.textBaseline = 'bottom';
-    g.textAlign = 'right';
-    g.fillStyle = 'rgba(255,255,255,0.75)';
-    const remaining = Math.max(0, (end - time) / this.mods.rate);
-    g.fillText(`-${Math.floor(remaining / 60000)}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, '0')}`, w - 12, hgt - 9);
-
-    // Hit error meter (bottom centre).
-    if (settings.get('gameplay.hitErrorMeter', true) && this.hitWindows.length > 0 && !inBreak) {
-      const maxWindow = Math.max(...this.hitWindows.map(x => x.length));
-      const meterW = Math.min(w * 0.5, 320) * ui;
-      const cx = w / 2;
-      const y = hgt - 26;
-      const colourFor = (r: HitResult) =>
-        r === HitResult.Perfect ? '#99eeff' : r === HitResult.Great ? '#66ccff' : r === HitResult.Good ? '#b3d944' : r === HitResult.Ok ? '#88b300' : '#ffcc22';
-      for (const win of [...this.hitWindows].sort((a, b) => b.length - a.length)) {
-        const ww = (win.length / maxWindow) * meterW;
-        g.fillStyle = colourFor(win.result);
-        g.globalAlpha = 0.6;
-        g.fillRect(cx - ww / 2, y, ww, 4);
-      }
-      g.globalAlpha = 1;
-      for (const e of this.hitErrors) {
-        const age = time - e.time;
-        const a = Math.max(0, 1 - age / 4000);
-        if (a <= 0) continue;
-        const x = cx + (e.offset / maxWindow) * (meterW / 2);
-        g.globalAlpha = a;
-        g.fillStyle = colourFor(e.result);
-        g.fillRect(x - 1.5, y - 10, 3, 24);
-      }
-      g.globalAlpha = 1;
-      g.fillStyle = '#fff';
-      g.fillRect(cx - 1, y - 12, 2, 28);
+    // Content.FadeColour(Gray, duration)
+    if (this.failAnimation.started && fail.colour < 1) {
+      g.fillStyle = `rgba(0,0,0,${1 - fail.colour})`;
+      g.fillRect(0, 0, w, hgt);
     }
+    g.restore();
 
-    // Key counter (right side).
-    if (settings.get('gameplay.showKeyCounter', true) && this.actions.length <= 6 && !this.mods.isAutoplay) {
-      const size = 36 * ui;
-      const x = w - size - 12;
-      let y = hgt / 2 - (this.actions.length * (size + 6)) / 2;
-      g.textAlign = 'center';
-      g.textBaseline = 'middle';
-      for (const a of this.actions) {
-        const held = (this.heldActions.get(a.id) ?? 0) > 0;
-        g.fillStyle = held ? '#9b30ff' : 'rgba(0,0,0,0.45)';
-        roundRect(g, x, y, size, size, 8);
-        g.fill();
-        g.fillStyle = '#fff';
-        g.font = `700 ${Math.round(13 * ui)}px ${font}`;
-        const count = this.actionCounts.get(a.id) ?? 0;
-        const key = [...this.bindings.entries()].find(([, act]) => act === a.id)?.[0];
-        g.fillText(count > 0 ? String(count) : key ? keyLabel(key) : a.label.slice(0, 2), x + size / 2, y + size / 2);
-        y += size + 6;
-      }
+    // redFlashLayer (outside the content, additive)
+    const flash = settings.get('gameplay.fadePlayfieldWhenHealthLow', true) ? this.failAnimation.redFlash(now) : 0;
+    if (flash > 0) {
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      g.fillStyle = `rgba(255,0,0,${flash})`;
+      g.fillRect(0, 0, w, hgt);
+      g.restore();
     }
-
-    if (this.mods.isAutoplay || this.replay) {
-      g.textAlign = 'center';
-      g.textBaseline = 'top';
-      g.font = `700 ${Math.round(16 * ui)}px ${font}`;
-      g.fillStyle = 'rgba(255,255,255,0.6)';
-      g.fillText(this.replay ? `REPLAY · ${this.replay.player.toUpperCase()}` : 'AUTOPLAY', w / 2, 14);
-    }
-  }
-
-  private drawBreak(g: CanvasRenderingContext2D, w: number, hgt: number, time: number): void {
-    const b = this.playable.breaks.find(x => time >= x.startTime && time <= x.endTime);
-    if (!b) return;
-    const remaining = b.endTime - time;
-    const total = b.endTime - b.startTime;
-    const fadeIn = Math.min(1, (time - b.startTime) / 300);
-    const fadeOut = Math.min(1, remaining / 300);
-    const a = Math.min(fadeIn, fadeOut);
-    g.globalAlpha = a;
-    const cx = w / 2;
-    const cy = hgt / 2;
-    const barW = Math.min(w * 0.6, 500) * (remaining / total);
-    g.fillStyle = 'rgba(255,255,255,0.8)';
-    g.fillRect(cx - barW / 2, cy - 1, barW, 2);
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.font = '700 34px "Exo 2", system-ui, sans-serif';
-    g.fillStyle = '#fff';
-    g.fillText(String(Math.ceil(remaining / 1000 / this.mods.rate)), cx, cy - 34);
-    g.font = '600 16px "Exo 2", system-ui, sans-serif';
-    g.fillStyle = 'rgba(255,255,255,0.7)';
-    g.fillText(`${(this.scoreProcessor.accuracy * 100).toFixed(2)}% · ${this.scoreProcessor.rank.replace('X', 'SS').replace('H', '')}`, cx, cy + 30);
-    g.globalAlpha = 1;
   }
 }
 
-function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
-  g.beginPath();
-  if (typeof g.roundRect === 'function') g.roundRect(x, y, w, h, Math.min(r, h / 2, w / 2));
-  else g.rect(x, y, w, h);
+/** OutQuint interpolation from `from` to `to` over `duration` ms. */
+function valueAt(t: number, from: number, to: number, duration: number): number {
+  if (t <= 0) return from;
+  if (t >= duration) return to;
+  const p = t / duration - 1;
+  return from + (to - from) * (p * p * p * p * p + 1);
 }

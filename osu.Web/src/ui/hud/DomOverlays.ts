@@ -358,9 +358,11 @@ export class GameplayMenuOverlay {
 
   show(info: { retries: number; progress: number | null; accuracy: string }): void {
     this.info.replaceChildren(
-      h('div', null, 'Retry count: ', h('b', null, String(info.retries))),
-      info.progress != null ? h('div', null, 'Song progress: ', h('b', null, `${info.progress}%`)) : null,
-      h('div', null, 'Accuracy: ', h('b', null, info.accuracy)),
+      ...[
+        h('div', null, 'Retry count: ', h('b', null, String(info.retries))),
+        info.progress != null ? h('div', null, 'Song progress: ', h('b', null, `${info.progress}%`)) : null,
+        h('div', null, 'Accuracy: ', h('b', null, info.accuracy)),
+      ].filter((x): x is HTMLDivElement => x != null),
     );
     this.select(-1);
     this.visible = true;

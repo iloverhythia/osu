@@ -178,8 +178,8 @@ export function drawArgonText(g: CanvasRenderingContext2D, x: number, y: number,
   g.translate(-ox, -ny);
   const right = nx + size.numberWidth;
   if (o.wireframeOpacity > 0) {
-    g.strokeStyle = css(colour, o.wireframeOpacity);
-    g.lineWidth = 1;
+    g.strokeStyle = css(colour, o.wireframeOpacity * 0.8);
+    g.lineWidth = 0.8;
     drawGlyphRun(g, o.wireframeTemplate, right, ny, true);
   }
   g.fillStyle = css(colour);

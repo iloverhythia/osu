@@ -11,7 +11,20 @@
 // or with legacy skin elements by TaikoLegacySkinRenderer (legacySkin.ts) when a user / beatmap skin provides them.
 import { TaikoLegacySkinRenderer } from './legacySkin';
 import { Easing, applyEasing } from '../../storyboard/Easing';
-import { FA_ANGLE_LEFT, FA_ASTERISK, type Glyph, clamp01, css, drawCircleGlow, drawIcon, drawSpacedText, fillCircle, fillPillBorder, roundRectPath, seededRandom } from './argonDraw';
+import {
+  FA_ANGLE_LEFT,
+  FA_ASTERISK,
+  type Glyph,
+  clamp01,
+  css,
+  drawCircleGlow,
+  drawIcon,
+  drawSpacedText,
+  fillCircle,
+  fillPillBorder,
+  roundRectPath,
+  seededRandom,
+} from './argonDraw';
 
 import { HIT_CLAP, HIT_FINISH, HIT_NORMAL, HIT_WHISTLE, HitSampleInfo } from '../../audio/HitSampleInfo';
 import { HitResult, isHit } from '../../scoring/HitResult';
@@ -307,10 +320,26 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
   private touchVisibilityChangeTime = -Infinity;
   private touchAlphaAtChange = 0;
   private readonly touchSegmentState: Record<TaikoAction, { pressTime: number; releaseTime: number; alphaAtRelease: number }> = {
-    LeftRim: { pressTime: -Infinity, releaseTime: -Infinity, alphaAtRelease: 0 },
-    LeftCentre: { pressTime: -Infinity, releaseTime: -Infinity, alphaAtRelease: 0 },
-    RightCentre: { pressTime: -Infinity, releaseTime: -Infinity, alphaAtRelease: 0 },
-    RightRim: { pressTime: -Infinity, releaseTime: -Infinity, alphaAtRelease: 0 },
+    LeftRim: {
+      pressTime: -Infinity,
+      releaseTime: -Infinity,
+      alphaAtRelease: 0,
+    },
+    LeftCentre: {
+      pressTime: -Infinity,
+      releaseTime: -Infinity,
+      alphaAtRelease: 0,
+    },
+    RightCentre: {
+      pressTime: -Infinity,
+      releaseTime: -Infinity,
+      alphaAtRelease: 0,
+    },
+    RightRim: {
+      pressTime: -Infinity,
+      releaseTime: -Infinity,
+      alphaAtRelease: 0,
+    },
   };
   private realNow = 0;
 
@@ -683,15 +712,29 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
         roll.colourFrom = before;
         roll.colourTo = roll.rollingHits / ROLLING_HITS_FOR_ENGAGED_COLOUR;
         roll.colourChangeTime = time;
-        if (hit && this.hitAnimations) this.flyingHits.push({ time: e.obj.startTime + e.timeOffset, rim: e.judgementType === HitType.Rim, strong: (e.obj as DrumRollTick).isStrong });
+        if (hit && this.hitAnimations)
+          this.flyingHits.push({
+            time: e.obj.startTime + e.timeOffset,
+            rim: e.judgementType === HitType.Rim,
+            strong: (e.obj as DrumRollTick).isStrong,
+          });
         break;
       }
 
       case 'hit': {
         if (type !== HitResult.Great && type !== HitResult.Ok && type !== HitResult.Miss) break;
-        this.judgements.push({ time, result: type, seed: Math.round(time * 16) ^ (e.obj.startTime | 0) });
+        this.judgements.push({
+          time,
+          result: type,
+          seed: Math.round(time * 16) ^ (e.obj.startTime | 0),
+        });
         const rim = (e.obj as Hit).type === HitType.Rim;
-        const explosion: Explosion = { time, result: type, rim, secondHitTime: null };
+        const explosion: Explosion = {
+          time,
+          result: type,
+          rim,
+          secondHitTime: null,
+        };
         e.explosion = explosion;
         this.explosions.push(explosion);
         break;
@@ -716,8 +759,12 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
     const obj = this.getMostValidObject(time);
     if (obj) {
       const baseSample = createHitSampleInfo(obj.samples, hitType === HitType.Rim ? HIT_CLAP : HIT_NORMAL);
-      const samples: HitSampleInfo[] = strong ? [baseSample, createHitSampleInfo(obj.samples, hitType === HitType.Rim ? HIT_WHISTLE : HIT_FINISH)] : [baseSample];
-      this.ctx.playSamples(samples, { pan: -SAMPLE_BALANCE_SPREAD / 2 + Math.random() * SAMPLE_BALANCE_SPREAD });
+      const samples: HitSampleInfo[] = strong
+        ? [baseSample, createHitSampleInfo(obj.samples, hitType === HitType.Rim ? HIT_WHISTLE : HIT_FINISH)]
+        : [baseSample];
+      this.ctx.playSamples(samples, {
+        pan: -SAMPLE_BALANCE_SPREAD / 2 + Math.random() * SAMPLE_BALANCE_SPREAD,
+      });
     }
 
     this.lastHitTime = time;
@@ -859,7 +906,12 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
   }
 
   /** Geometry of DrumTouchInputArea in CSS pixels. */
-  private touchGeometry(): { cx: number; cy: number; radius: number; gap: number } {
+  private touchGeometry(): {
+    cx: number;
+    cy: number;
+    radius: number;
+    gap: number;
+  } {
     const u = this.layout.unit;
     const containerHeight = this.height * 0.45;
     const radius = Math.min(this.width, containerHeight);
@@ -1086,7 +1138,18 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
 
     const rim = h.type === HitType.Rim;
     if (this.legacy?.has.hitCircle) this.legacy.drawHit(ctx, x, y, D * scale, rim, h.isStrong, alpha, this.ctx.combo, h.startTime, now);
-    else this.drawArgonCirclePiece(ctx, x - (D * scale) / 2, y - (D * scale) / 2, D * scale, D * scale, rim ? ARGON_RIM : ARGON_CENTRE, FA_ANGLE_LEFT, alpha, flash);
+    else
+      this.drawArgonCirclePiece(
+        ctx,
+        x - (D * scale) / 2,
+        y - (D * scale) / 2,
+        D * scale,
+        D * scale,
+        rim ? ARGON_RIM : ARGON_CENTRE,
+        FA_ANGLE_LEFT,
+        alpha,
+        flash,
+      );
   }
 
   /**
@@ -1094,7 +1157,18 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
    * a black (alpha 190/255) circle, a 20/70 ring of the accent gradient at half opacity, a 5/70 ring of the accent gradient,
    * an additive white flash layer and a white FontAwesome icon (ICON_SIZE, scale (0.8, 1)).
    */
-  private drawArgonCirclePiece(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, accent: readonly [RGB, RGB], icon: Glyph | null, alpha: number, flash: number, rotation = 0): void {
+  private drawArgonCirclePiece(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    accent: readonly [RGB, RGB],
+    icon: Glyph | null,
+    alpha: number,
+    flash: number,
+    rotation = 0,
+  ): void {
     if (h <= 0) return;
     const r = h / 2;
     const prev = ctx.globalAlpha;
@@ -1244,7 +1318,8 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
     // Centre circle (ArgonSwellCirclePiece: Asterisk icon, rotated by DefaultSwell.Update)
     const cd = D * bodyScale;
     const a = alpha * bodyAlpha * centreAlpha;
-    if (a > 0.001) this.drawArgonCirclePiece(ctx, x - cd / 2, CENTRE_Y - cd / 2, cd, cd, ARGON_SWELL, FA_ASTERISK, a, e.judged ? 0 : beat.flash, e.swellRotation);
+    if (a > 0.001)
+      this.drawArgonCirclePiece(ctx, x - cd / 2, CENTRE_Y - cd / 2, cd, cd, ARGON_SWELL, FA_ASTERISK, a, e.judged ? 0 : beat.flash, e.swellRotation);
   }
 
   /** DrawableFlyingHit: a DrawableHit judged (and animated) when the drum roll tick was hit. */
@@ -1258,7 +1333,18 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
       const y = CENTRE_Y + g.y;
       const d = D * g.scale;
       if (this.legacy?.has.hitCircle) this.legacy.drawHit(ctx, x, y, d, f.rim, f.strong, g.alpha, this.ctx.combo, f.time, now);
-      else this.drawArgonCirclePiece(ctx, x - d / 2, y - d / 2, d, d, f.rim ? ARGON_RIM : ARGON_CENTRE, FA_ANGLE_LEFT, g.alpha, 0.9 * (1 - applyEasing(Easing.OutQuint, clamp01(t / 500))));
+      else
+        this.drawArgonCirclePiece(
+          ctx,
+          x - d / 2,
+          y - d / 2,
+          d,
+          d,
+          f.rim ? ARGON_RIM : ARGON_CENTRE,
+          FA_ANGLE_LEFT,
+          g.alpha,
+          0.9 * (1 - applyEasing(Easing.OutQuint, clamp01(t / 500))),
+        );
     }
   }
 
@@ -1358,7 +1444,8 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
 
       // AnimateSecondHit: outer.ResizeTo(STRONG_SCALE, 500, OutQuint)
       let outerScale = 1;
-      if (ex.secondHitTime !== null && now >= ex.secondHitTime) outerScale = 1 + (STRONG_SCALE - 1) * applyEasing(Easing.OutQuint, clamp01((now - ex.secondHitTime) / 500));
+      if (ex.secondHitTime !== null && now >= ex.secondHitTime)
+        outerScale = 1 + (STRONG_SCALE - 1) * applyEasing(Easing.OutQuint, clamp01((now - ex.secondHitTime) / 500));
 
       const gradient = ex.rim ? RIM_HIT_GRADIENT : CENTRE_HIT_GRADIENT;
       const glow = ex.rim ? RIM_HIT_GLOW : CENTRE_HIT_GLOW;

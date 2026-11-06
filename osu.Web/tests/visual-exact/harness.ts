@@ -33,10 +33,13 @@ let combo = 0;
 const ctx: GameplayContext = {
   mods,
   skin: createSkin(null),
-  settings: { get: <T>(key: string, fallback: T): T => (key in settings ? (settings[key] as T) : fallback) },
+  settings: {
+    get: <T>(key: string, fallback: T): T => (key in settings ? (settings[key] as T) : fallback),
+  },
   autoplay: params.get('autoplay') !== '0',
   rate: mods.rate,
   applyResult: r => {
+    if (params.has('debug')) console.log('result', r.type, r.judgement.maxResult);
     if (r.type === HitResult.Miss) combo = 0;
     else if (isHit(r.type) && r.judgement.maxResult !== HitResult.IgnoreHit) combo++;
   },

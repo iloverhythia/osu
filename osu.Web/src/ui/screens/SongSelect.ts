@@ -1,562 +1,1004 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
-// Song select (port of the essentials of SongSelect / BeatmapCarousel / BeatmapInfoWedge / BeatmapLeaderboard).
+// Port of osu.Game/Screens/Select/SongSelect.cs + SoloSongSelect.cs (+ ModSpeedHotkeyHandler.cs, LeftSideInteractionContainer.cs):
+// the layout (title wedge + details area on the left, filter control + carousel on the right, footer at the bottom), the 150ms
+// selection debounce, global-beatmap validation, filtering hookup, background reveal on mouse hold, keyboard handling, scoping to a
+// beatmap set, and starting gameplay (Ctrl+Enter adds Autoplay). Components live in ../select/.
 
+import '../select/select.css';
 import { settings } from '../../framework/Settings';
 import { RULESET_DISPLAY_NAMES } from '../../brand';
-import { ModSet, applyCommonDifficultyMods, applyDifficultyAdjust } from '../../game/mods/Mods';
+import { MODS, ModSet } from '../../game/mods/Mods';
 import { availableRulesets } from '../../game/rulesets';
-import type { Ruleset } from '../../game/rulesets/Ruleset';
-import { RANK_COLOURS, RANK_DISPLAY, type ScoreRank } from '../../game/scoring/ScoreRank';
-import { BeatmapDifficulty } from '../../game/beatmaps/Difficulty';
-import { BeatmapEntry, BeatmapSetRecord, Database } from '../../game/storage/Database';
+import type { ScoreRank } from '../../game/scoring/ScoreRank';
+import { Database, type BeatmapSetRecord, type ScoreRecord } from '../../game/storage/Database';
 import { findFile } from '../../game/storage/Importer';
-import { clear, formatNumber, formatTime, h, starColour, starTextColour } from '../dom';
+import { h } from '../dom';
 import type { Game } from '../Game';
 import { openModSelect } from '../overlays/ModSelect';
 import { openSettings } from '../overlays/Settings';
 import { Screen } from '../Screen';
 import { confirmDialog } from '../confirm';
 import { PlayerScreen } from './Player';
-import { MOD_BY_ACRONYM, MOD_TYPE_COLOURS } from '../../game/mods/Mods';
+import { cssEasing, Easing, tween } from '../select/Anim';
+import { BeatmapCarousel } from '../select/BeatmapCarousel';
+import { allowGameplayWithRuleset, CarouselItem, GroupDefinition, GroupedBeatmap, GroupedBeatmapSet, ManiaFilterCriteria } from '../select/BeatmapCarouselFilters';
+import { CarouselModelBuilder, setLastPlayed, getLastPlayed } from '../select/CarouselModel';
+import { css, OverlayColourProvider, OverlayColourScheme, OsuColour } from '../select/Colours';
+import { closeContextMenu, MenuItem, showContextMenu } from '../select/Components';
+import { FilterControl, HEIGHT_FROM_SCREEN_TOP } from '../select/FilterControl';
+import type { FilterBeatmap, FilterCriteria } from '../select/FilterCriteria';
+import { FooterButtonMods, FooterButtonOptions, FooterButtonRandom, OptionsEntry, ScreenFooter, FOOTER_HEIGHT } from '../select/Footer';
+import { rulesetIcon } from '../select/Icons';
+import { BeatmapDetailsArea, BeatmapTitleWedge, CORNER_RADIUS_HIDE_OFFSET, NoResultsPlaceholder, SongSelectHost } from '../select/Wedges';
 
-type SortMode = 'title' | 'artist' | 'creator' | 'difficulty' | 'length' | 'added' | 'bpm';
+/** SongSelect.SELECTION_DEBOUNCE */
+const SELECTION_DEBOUNCE = 150;
+/** SongSelect.filter_delay */
+const FILTER_DELAY = 250;
+/** SongSelect.REVEAL_BACKGROUND_DELAY */
+const REVEAL_BACKGROUND_DELAY = 200;
+/** In place of lazer's toolbar (which offsets every screen by its height). */
+const TOOLBAR_HEIGHT = 40;
 
-const RULESET_NAMES = RULESET_DISPLAY_NAMES;
+const bgUrls = new Map<string, string>();
 
 export class SongSelectScreen extends Screen {
-  private carousel: HTMLDivElement;
-  private info: HTMLDivElement;
-  private search: HTMLInputElement;
-  private sortSelect: HTMLSelectElement;
-  private tabs: HTMLDivElement;
-  private modPills: HTMLDivElement;
-  private visible: { set: BeatmapSetRecord; beatmaps: BeatmapEntry[] }[] = [];
+  private readonly colours = new OverlayColourProvider(OverlayColourScheme.Blue);
+  private readonly scaleRoot: HTMLDivElement;
+  private readonly mainContent: HTMLDivElement;
+  private readonly leftColumn: HTMLDivElement;
+  private readonly rightColumn: HTMLDivElement;
+  private readonly rightGradient: HTMLDivElement;
+  private readonly carouselContainer: HTMLDivElement;
+  private readonly toolbar: HTMLDivElement;
+  private readonly rulesetTabs: HTMLDivElement;
+
+  private readonly model = new CarouselModelBuilder();
+  private readonly carousel: BeatmapCarousel;
+  private readonly filterControl: FilterControl;
+  private readonly titleWedge: BeatmapTitleWedge;
+  private readonly detailsArea: BeatmapDetailsArea;
+  private readonly noResults: NoResultsPlaceholder;
+  private readonly footer: ScreenFooter;
+  private readonly modsButton: FooterButtonMods;
+  private readonly randomButton: FooterButtonRandom;
+  private readonly optionsButton: FooterButtonOptions;
+
   private unsubscribe: (() => void)[] = [];
-  private starCache = new Map<string, number>();
-  private starJob = 0;
-  private bgObserver: IntersectionObserver;
+  private raf = 0;
+  private lastFrame = 0;
+  private current = false;
+  private drawSize = { w: 1024, h: 768, scale: 1 };
+
+  // selection debounce
+  private debounceQueuedSelection: FilterBeatmap | null = null;
+  private debounceElapsed = 0;
+  private keysHeld = new Set<string>();
+
+  // filtering
+  private filterDebounce = 0;
+  private filterDebouncePending = false;
+  private firstFilter = true;
+  private carouselItemsPresented = false;
+
+  // global state tracking
+  private lastWorkingKey = '';
+  private lastRulesetId = -1;
+  private lastModsKey = '';
+  private lastModsList: string[] = [];
+  private modsAtGameplayStart: ModSet | null = null;
+  private ctrlForStart = false;
+
+  // scoping
+  private beforeScopedSelection: GroupedBeatmap | null = null;
+
+  // beat sync
+  private beatIndex = 0;
+  private lastPhase = 0;
+
+  // background reveal
+  private revealTimer = 0;
+  private revealed = false;
+
+  // ModSpeedHotkeyHandler
+  private lastActiveRateAdjustMod: { acronym: string; settings: Record<string, number | boolean | null> } | null = null;
+
+  private readonly localRanks = new Map<string, ScoreRank | null>();
+  private readonly localRankWaiters = new Map<string, ((r: ScoreRank | null) => void)[]>();
 
   constructor(game: Game) {
     super(game, 'song-select');
-    this.backgroundDim = 0.6;
+    this.backgroundDim = 0.1;
+    this.showTriangles = false;
 
-    this.search = h('input', { class: 'search', type: 'search', placeholder: 'Search (title, artist, creator, tags…)', spellcheck: false });
-    this.search.addEventListener('input', () => this.refresh());
-    this.sortSelect = h(
-      'select',
-      { class: 'sort', title: 'Sort' },
-      ...(['title', 'artist', 'creator', 'difficulty', 'bpm', 'length', 'added'] as SortMode[]).map(m => h('option', { value: m }, `Sort: ${m}`)),
+    const host = this.createHost();
+
+    this.carousel = new BeatmapCarousel(
+      {
+        colours: this.colours,
+        ruleset: () => this.game.ruleset,
+        mods: () => this.game.mods,
+        showConverts: () => this.filterControl.allowConverts,
+        sourceOf: b => this.model.sources.get(b)!,
+        recordOf: s => this.model.recordFor(s.id),
+        backgroundUrl: r => backgroundUrl(r),
+        activate: item => {
+          this.ctrlForStart = false;
+          this.carousel.activate(item);
+        },
+        contextMenu: (item, e) => this.showPanelContextMenu(item, e),
+        scopeToSet: set => this.scopeToBeatmapSet(set),
+        canScope: () => this.filterControl.scopedBeatmapSet == null,
+        localRank: (b, cb) => this.getLocalRank(b.id, cb),
+        visibleBeatmaps: s => this.carousel.visibleBeatmapsOf(s),
+        preferUnicode: () => settings.get('ui.preferUnicode', false),
+      },
+      {
+        requestPresentBeatmap: gb => this.selectAndRun(gb.beatmap),
+        requestSelection: gb => this.queueBeatmapSelection(gb),
+        requestRecommendedSelection: list => this.requestRecommendedSelection(list),
+        newItemsPresented: () => this.newItemsPresented(),
+        playSample: name => this.game.playUiSample(name === 'random' ? 'menu-confirm' : 'menu-click', name === 'traverse' ? 0.25 : 0.4),
+        groupingContext: () => ({
+          getLocalUserTopRanks: () => this.topRankMapping(),
+          getVariant: (b, criteria) => (this.game.ruleset.id === 3 ? { variant: ManiaFilterCriteria.keyCountFor(b, criteria.mods), name: `${ManiaFilterCriteria.keyCountFor(b, criteria.mods)}K` } : null),
+        }),
+      },
     );
-    this.sortSelect.value = settings.get('ui.sortMode', 'title');
-    this.sortSelect.addEventListener('change', () => {
-      settings.set('ui.sortMode', this.sortSelect.value);
-      this.refresh();
+
+    this.filterControl = new FilterControl({
+      colours: this.colours,
+      ruleset: () => this.game.ruleset,
+      mods: () => this.game.mods,
+      unscope: () => this.unscopeBeatmapSet(true),
     });
-    this.tabs = h('div', { class: 'ruleset-tabs' });
-    this.carousel = h('div', { class: 'carousel scroll-thin' });
-    this.info = h('div', { class: 'ss-info scroll-thin' });
-    this.modPills = h('div', { class: 'mod-pills' });
+    this.filterControl.onCriteriaChanged = c => this.criteriaChanged(c);
+    this.filterControl.search.addEventListener('keydown', e => this.onSearchKeyDown(e));
 
-    this.bgObserver = new IntersectionObserver(entries => {
-      for (const en of entries) {
-        if (!en.isIntersecting) continue;
-        const el = en.target as HTMLElement;
-        const setId = el.dataset.set;
-        const set = this.game.library.sets.find(s => s.id === setId);
-        if (set) {
-          const blob = findFile(set.files, set.beatmaps[0].backgroundFile);
-          if (blob) el.style.backgroundImage = `url("${thumbUrl(set.id, blob)}")`;
-        }
-        this.bgObserver.unobserve(el);
-      }
+    this.titleWedge = new BeatmapTitleWedge(host);
+    this.detailsArea = new BeatmapDetailsArea(host, settings);
+    this.noResults = new NoResultsPlaceholder({
+      clearSearch: () => this.filterControl.search_(''),
+      resetStars: () => this.filterControl.resetStars(),
+      enableConverts: () => this.filterControl.setAllowConverts(true),
+      hasAnyBeatmaps: () => this.game.library.sets.length > 0,
     });
 
-    const top = h(
-      'div',
-      { class: 'ss-top' },
-      h('button', { class: 'btn small ghost', onclick: () => this.game.back(), title: 'Back (Esc)' }, '‹ Back'),
-      this.tabs,
-      this.search,
-      this.sortSelect,
+    // ---------------------------------------------------------------- footer
+    this.footer = new ScreenFooter(
+      () => this.game.back(),
+      () => {
+        this.ensureGlobalBeatmapValid();
+        const b = this.workingFilterBeatmap();
+        if (b) this.selectAndRun(b);
+      },
     );
-    const bottom = h(
+    const fc = () => this.footer.colours;
+    this.modsButton = new FooterButtonMods(fc);
+    this.modsButton.action = () => this.toggleModSelect();
+    this.modsButton.requestDeselectAllMods = () => this.game.setMods(this.game.mods.forRuleset(this.game.ruleset.shortName, []));
+    this.randomButton = new FooterButtonRandom(fc);
+    this.randomButton.nextRandom = () => {
+      if (!this.carousel.nextRandom()) this.game.playUiSample('fail', 0.4);
+    };
+    this.randomButton.previousRandom = () => {
+      if (!this.carousel.previousRandom()) this.game.playUiSample('fail', 0.4);
+    };
+    this.optionsButton = new FooterButtonOptions(fc);
+    this.optionsButton.getEntries = () => this.optionsEntries();
+    this.footer.setButtons([this.modsButton, this.randomButton, this.optionsButton]);
+
+    // ---------------------------------------------------------------- layout
+    this.rulesetTabs = h('div', { class: 'ss-ruleset-selector' });
+    this.toolbar = h(
       'div',
-      { class: 'ss-bottom' },
-      h('button', { class: 'btn', onclick: () => openModSelect(this.game) }, 'Mods ', h('span', { class: 'kbd' }, 'F1')),
-      h('button', { class: 'btn', onclick: () => this.random() }, 'Random ', h('span', { class: 'kbd' }, 'F2')),
-      h('button', { class: 'btn', onclick: () => this.game.openFilePicker() }, 'Import .osz'),
-      h('button', { class: 'btn', onclick: () => this.game.openFolderPicker(), title: 'Import a folder (for example an osu!stable Songs folder)' }, 'Import folder'),
-      h('button', { class: 'btn ghost', onclick: () => openSettings(this.game) }, '⚙'),
-      this.modPills,
-      h('div', { class: 'spacer' }),
-      h('button', { class: 'btn primary', style: { padding: '12px 30px', fontSize: '17px' }, onclick: () => this.play() }, 'Play ', h('span', { class: 'kbd' }, 'Enter')),
+      { class: 'ss-toolbar' },
+      h('button', { class: 'ss-toolbar-button', title: 'Settings (Ctrl+O)', onclick: () => openSettings(this.game) }, '⚙'),
+      h('button', { class: 'ss-toolbar-button', onclick: () => this.game.openFilePicker() }, 'Import .osz'),
+      h('button', { class: 'ss-toolbar-button', title: 'Import a folder (for example an osu!stable Songs folder)', onclick: () => this.game.openFolderPicker() }, 'Import folder'),
+      h('div', { class: 'ss-toolbar-spacer' }),
+      this.rulesetTabs,
     );
-    this.el.append(top, h('div', { class: 'ss-body' }, this.info, this.carousel), bottom);
+
+    const wedges = h('div', { class: 'ss-wedges' }, this.titleWedge.el, h('div', { class: 'ss-wedge-gap' }), this.detailsArea.el);
+    this.leftColumn = h('div', { class: 'ss-left', style: { top: `${-CORNER_RADIUS_HIDE_OFFSET}px`, left: `${-CORNER_RADIUS_HIDE_OFFSET}px` } }, wedges);
+    // LeftSideInteractionContainer: hovering / clicking the left side scrolls the carousel back to the selection.
+    this.leftColumn.addEventListener('mousedown', e => {
+      if ((e.target as HTMLElement).closest('input, button, .sheared-dropdown, .lb-score, .md-link, .md-tag, .tw-link')) return;
+      this.carousel.userScrolling = false;
+      this.carousel.scrollToSelection();
+    });
+
+    this.rightGradient = h('div', { class: 'ss-right-gradient' });
+    this.carouselContainer = h('div', { class: 'ss-carousel-container', style: { top: `${HEIGHT_FROM_SCREEN_TOP + 5}px`, bottom: '5px' } }, this.carousel.el, this.noResults.el);
+    this.rightColumn = h('div', { class: 'ss-right' }, this.rightGradient, this.carouselContainer, this.filterControl.el);
+
+    this.mainContent = h('div', { class: 'ss-main', style: { paddingBottom: `${FOOTER_HEIGHT}px` } }, h('div', { class: 'ss-left-gradient' }), this.leftColumn, this.rightColumn);
+    this.scaleRoot = h('div', { class: 'ss-scale' }, h('div', { class: 'ss-screen-area', style: { top: `${TOOLBAR_HEIGHT}px` } }, this.mainContent, this.footer.el), this.toolbar);
+    this.colours.apply(this.scaleRoot);
+    this.scaleRoot.style.setProperty('--ss-outquint', cssEasing(Easing.OutQuint));
+    this.scaleRoot.style.setProperty('--ss-in', cssEasing(Easing.In));
+    this.el.appendChild(this.scaleRoot);
+
+    this.el.addEventListener('pointerdown', e => this.onPointerDown(e));
+    window.addEventListener('pointerup', this.onPointerUp);
+    window.addEventListener('resize', this.onResize);
   }
 
+  private createHost(): SongSelectHost {
+    return {
+      colours: this.colours,
+      working: () => this.game.working,
+      ruleset: () => this.game.ruleset,
+      mods: () => this.game.mods,
+      setMods: m => this.game.setMods(m),
+      preferUnicode: () => settings.get('ui.preferUnicode', false),
+      addToSearch: t => this.filterControl.addToSearch(t),
+      watchReplay: s => void this.watchReplay(s),
+      deleteScore: s => void this.deleteScore(s),
+      playSample: (n, v) => this.game.playUiSample(n, v ?? 0.5),
+      overlayHost: () => this.scaleRoot,
+    };
+  }
+
+  // ------------------------------------------------------------------ lifecycle
+
   onEnter(): void {
-    this.unsubscribe.push(this.game.library.subscribe(() => this.refresh()));
-    this.unsubscribe.push(this.game.subscribe(() => this.onSelectionChanged()));
-    void this.game.library.load().then(() => this.refresh());
-    this.refresh();
-    if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => this.search.focus({ preventScroll: true }), 50);
+    this.current = true;
+    this.unsubscribe.push(this.game.library.subscribe(() => this.libraryChanged()));
+    this.unsubscribe.push(this.game.subscribe(() => this.globalStateChanged()));
+    void this.game.library.load().then(() => this.libraryChanged());
+    this.lastRulesetId = this.game.ruleset.id;
+    this.lastModsKey = this.game.mods.toString();
+    this.lastModsList = this.game.mods.list;
+    this.renderRulesetTabs();
+    this.libraryChanged();
+    this.filterControl.updateCriteria();
+    this.onResize();
+    this.arrive();
+    this.updateFooterMods();
+    this.lastFrame = performance.now();
+    this.raf = requestAnimationFrame(this.frame);
+    if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => this.filterControl.search.focus({ preventScroll: true }), 50);
   }
 
   onResume(): void {
+    this.current = true;
     this.game.setBackgroundDim(this.backgroundDim);
-    this.refresh();
-    this.renderInfo();
+    // SoloSongSelect.revertMods
+    if (this.modsAtGameplayStart) {
+      this.game.setMods(this.modsAtGameplayStart);
+      this.modsAtGameplayStart = null;
+    }
+    this.localRanks.clear();
+    this.arrive();
+    this.libraryChanged();
+    this.ensureGlobalBeatmapValid();
+    this.detailsArea.refresh();
+    this.titleWedge.update();
+    this.lastFrame = performance.now();
+    cancelAnimationFrame(this.raf);
+    this.raf = requestAnimationFrame(this.frame);
+    if (!this.game.previewTrack) void this.game.startPreview();
+  }
+
+  onSuspend(): void {
+    this.current = false;
+    this.carousel.visuallyFocusSelected = true;
+    this.leave();
+    cancelAnimationFrame(this.raf);
   }
 
   onExit(): void {
+    this.current = false;
+    this.leave();
     this.unsubscribe.forEach(u => u());
-    this.bgObserver.disconnect();
+    this.unsubscribe = [];
+    cancelAnimationFrame(this.raf);
+    window.removeEventListener('pointerup', this.onPointerUp);
+    window.removeEventListener('resize', this.onResize);
+    this.carousel.dispose();
+    closeContextMenu();
   }
 
-  // ------------------------------------------------------------------ filtering
-
-  private matchesRuleset(e: BeatmapEntry, r: Ruleset): boolean {
-    return e.rulesetId === r.id || (e.rulesetId === 0 && r.id !== 0);
+  onBack(): boolean {
+    if (closeContextMenu()) return false;
+    if (this.optionsButton.isOpen) {
+      this.optionsButton.hidePopover();
+      return false;
+    }
+    if (this.filterControl.scopedBeatmapSet) {
+      this.unscopeBeatmapSet(true);
+      return false;
+    }
+    return true;
   }
 
-  private refresh(): void {
-    const r = this.game.ruleset;
-    const terms = this.search.value.toLowerCase().split(/\s+/).filter(Boolean);
-    const filters: ((e: BeatmapEntry) => boolean)[] = [];
-    const textTerms: string[] = [];
-    // Support simple osu!-style filters like "stars>4", "ar>=9", "length<120", "bpm>180"
-    for (const t of terms) {
-      const m = /^(stars|star|sr|ar|od|cs|hp|bpm|length|keys)(<=|>=|<|>|=)([\d.]+)$/.exec(t);
-      if (!m) {
-        textTerms.push(t);
-        continue;
-      }
-      const v = parseFloat(m[3]);
-      const get = (e: BeatmapEntry): number => {
-        switch (m[1]) {
-          case 'stars':
-          case 'star':
-          case 'sr':
-            return e.stars ?? 0;
-          case 'ar':
-            return e.approachRate;
-          case 'od':
-            return e.overallDifficulty;
-          case 'cs':
-          case 'keys':
-            return e.circleSize;
-          case 'hp':
-            return e.drainRate;
-          case 'bpm':
-            return e.bpm;
-          default:
-            return e.length / 1000;
-        }
-      };
-      const cmp = m[2];
-      filters.push(e => {
-        const x = get(e);
-        return cmp === '<' ? x < v : cmp === '>' ? x > v : cmp === '<=' ? x <= v : cmp === '>=' ? x >= v : Math.abs(x - v) < 0.05;
-      });
+  private arrive(): void {
+    this.carousel.visuallyFocusSelected = false;
+    this.updateWedgeVisibility();
+    this.footer.setVisible(true);
+  }
+
+  private leave(): void {
+    this.restoreBackground();
+    this.optionsButton.hidePopover();
+    this.updateWedgeVisibility();
+  }
+
+  private readonly onResize = (): void => {
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    // ScalingContainer: DrawSizePreservingFillContainer with a 1024x768 target and the Minimum strategy.
+    let scale = Math.min(W / 1024, H / 768);
+    const portrait = W < H;
+    if (portrait) scale = Math.min(1, W / 560);
+    this.drawSize = { w: W / scale, h: H / scale, scale };
+    this.scaleRoot.style.width = `${this.drawSize.w}px`;
+    this.scaleRoot.style.height = `${this.drawSize.h}px`;
+    this.scaleRoot.style.transform = `scale(${scale})`;
+    this.scaleRoot.style.setProperty('--ui-scale', String(scale));
+    document.documentElement.style.setProperty('--ss-ui-scale', String(scale));
+    this.el.classList.toggle('portrait', portrait);
+    this.layout();
+  };
+
+  /** SongSelect.Update: grid column dimensions. */
+  private layout(): void {
+    const DW = this.drawSize.w;
+    const DH = this.drawSize.h - TOOLBAR_HEIGHT;
+    const portrait = this.el.classList.contains('portrait');
+    const widescreenBonusWidth = Math.max(0, DW / DH - 2);
+    const left = portrait ? 0 : Math.min(DW * 0.5, 700 + widescreenBonusWidth * 100);
+    const right = portrait ? DW : Math.max(500, Math.min(DW * 0.5, 700 + widescreenBonusWidth * 300));
+    this.leftColumn.style.width = `${left + CORNER_RADIUS_HIDE_OFFSET}px`;
+    this.leftColumn.style.display = portrait ? 'none' : '';
+    this.rightColumn.style.width = `${right}px`;
+    this.carousel.bleedTop = HEIGHT_FROM_SCREEN_TOP + 5;
+    this.carousel.bleedBottom = FOOTER_HEIGHT + 5;
+    this.titleWedge.layout();
+  }
+
+  // ------------------------------------------------------------------ frame loop
+
+  private readonly frame = (now: number): void => {
+    const elapsed = Math.min(100, now - this.lastFrame);
+    this.lastFrame = now;
+    if (this.current) {
+      this.updateDebounce(elapsed);
+      this.updateBeat();
     }
+    const carouselHeight = this.carouselContainer.offsetHeight;
+    this.carousel.update(carouselHeight, elapsed);
+    this.raf = requestAnimationFrame(this.frame);
+  };
 
-    const sets: { set: BeatmapSetRecord; beatmaps: BeatmapEntry[] }[] = [];
-    for (const set of this.game.library.sets) {
-      const beatmaps = set.beatmaps.filter(e => {
-        if (!this.matchesRuleset(e, r)) return false;
-        if (!filters.every(f => f(e))) return false;
-        if (textTerms.length === 0) return true;
-        const hay = `${e.title} ${e.titleUnicode} ${e.artist} ${e.artistUnicode} ${e.creator} ${e.source} ${e.tags} ${e.difficultyName}`.toLowerCase();
-        return textTerms.every(t => hay.includes(t));
-      });
-      if (beatmaps.length > 0) sets.push({ set, beatmaps: [...beatmaps].sort((a, b) => (a.rulesetId === r.id ? 0 : 1) - (b.rulesetId === r.id ? 0 : 1) || (a.stars ?? 0) - (b.stars ?? 0)) });
+  private updateBeat(): void {
+    const beat = this.game.beatPhase();
+    if (!beat) return;
+    // BeatSyncedContainer.EarlyActivationMilliseconds = 40
+    const phase = (beat.phase + 40 / beat.beatLength) % 1;
+    if (phase < this.lastPhase) {
+      this.beatIndex++;
+      this.carousel.onBeat(this.beatIndex, beat.beatLength, 4);
     }
+    this.lastPhase = phase;
+  }
 
-    const mode = this.sortSelect.value as SortMode;
-    const first = (x: { beatmaps: BeatmapEntry[] }) => x.beatmaps[0];
-    const cmpStr = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' });
-    sets.sort((a, b) => {
-      switch (mode) {
-        case 'artist':
-          return cmpStr(first(a).artist, first(b).artist);
-        case 'creator':
-          return cmpStr(first(a).creator, first(b).creator);
-        case 'difficulty':
-          return Math.max(...a.beatmaps.map(x => x.stars ?? 0)) - Math.max(...b.beatmaps.map(x => x.stars ?? 0));
-        case 'length':
-          return first(a).length - first(b).length;
-        case 'bpm':
-          return first(a).bpm - first(b).bpm;
-        case 'added':
-          return b.set.addedAt - a.set.addedAt;
-        default:
-          return cmpStr(first(a).title, first(b).title);
-      }
-    });
-    this.visible = sets;
+  // ------------------------------------------------------------------ library / global state
 
-    // Keep a valid selection.
+  private libraryChanged(): void {
+    this.carousel.setBeatmaps(this.model.build(this.game.library.sets));
+  }
+
+  private workingFilterBeatmap(): FilterBeatmap | null {
     const w = this.game.working;
-    const stillVisible = w && sets.some(s => s.set.id === w.set.id && s.beatmaps.some(b => b.hash === w.entry.hash));
-    if (!stillVisible && sets.length > 0) {
-      const same = w ? sets.find(s => s.set.id === w.set.id) : undefined;
-      const target = same ?? sets[0];
-      this.game.select(target.set, target.beatmaps[0]);
-    }
-    this.renderTabs();
-    this.renderCarousel();
-    this.renderInfo();
+    if (!w) return null;
+    return this.model.findBeatmap(w.set.id, w.entry.hash) ?? null;
   }
 
-  private onSelectionChanged(): void {
-    this.renderTabs();
-    this.renderCarousel();
-    this.renderInfo();
-    this.renderModPills();
-  }
-
-  private renderTabs(): void {
-    clear(this.tabs);
-    for (const r of availableRulesets()) {
-      this.tabs.appendChild(
-        h(
-          'button',
-          {
-            class: `ruleset-tab${r === this.game.ruleset ? ' active' : ''}`,
-            onclick: () => {
-              this.game.setRuleset(r);
-              this.refresh();
-            },
-          },
-          RULESET_NAMES[r.id] ?? r.name,
-        ),
-      );
-    }
-  }
-
-  private renderModPills(): void {
-    clear(this.modPills);
-    for (const m of this.game.mods.list) {
-      const def = MOD_BY_ACRONYM.get(m);
-      this.modPills.appendChild(h('span', { class: 'mod-pill', style: { background: def ? MOD_TYPE_COLOURS[def.type] : '#fff' } }, this.game.mods.label(m)));
-    }
-  }
-
-  private renderCarousel(): void {
-    const scrollTop = this.carousel.scrollTop;
-    clear(this.carousel);
+  private globalStateChanged(): void {
     const w = this.game.working;
-    if (this.visible.length === 0) {
-      this.carousel.appendChild(
-        h(
-          'div',
-          { class: 'empty-state' },
-          this.search.value ? 'No beatmaps match your search.' : `No beatmaps for ${this.game.ruleset.name} yet.`,
-          h('br'),
-          'Drop .osz files anywhere, or use ',
-          h('b', null, 'Import'),
-          ' below. You can also import a whole osu!stable Songs folder.',
-        ),
-      );
-      return;
+    const workingKey = w ? `${w.set.id}|${w.entry.hash}` : '';
+    const rulesetChanged = this.game.ruleset.id !== this.lastRulesetId;
+    const modsKey = this.game.mods.toString();
+    const modsChanged = modsKey !== this.lastModsKey;
+
+    if (rulesetChanged) {
+      this.lastRulesetId = this.game.ruleset.id;
+      this.renderRulesetTabs();
+      this.filterControl.updateGroupItems();
+      this.filterControl.updateCriteria();
+      this.carousel.refreshStarRatings();
+      this.localRanks.clear();
+      this.detailsArea.refresh();
+      this.titleWedge.update();
     }
-    let selectedEl: HTMLElement | null = null;
-    for (const { set, beatmaps } of this.visible) {
-      const e = beatmaps[0];
-      const selected = w?.set.id === set.id;
-      const card = h(
-        'div',
-        { class: `set-card${selected ? ' selected' : ''}`, 'data-set': set.id, onclick: () => this.game.select(set, selected ? w!.entry : beatmaps[0]) },
-        h('div', { class: 't' }, this.displayTitle(e)),
-        h('div', { class: 'a' }, `${this.displayArtist(e)} · ${e.creator}`),
-        h(
-          'div',
-          { class: 'dots' },
-          beatmaps.map(b => h('span', { class: 'dot', title: `${b.difficultyName} (${(b.stars ?? 0).toFixed(2)}★)`, style: { background: starColour(b.stars ?? 0) } })),
-        ),
-      );
-      this.bgObserver.observe(card);
-      this.carousel.appendChild(card);
-      if (selected) {
-        selectedEl = card;
-        const list = h('div', { class: 'diff-list' });
-        for (const b of beatmaps) {
-          const isSel = w?.entry.hash === b.hash;
-          const stars = isSel ? (this.starCache.get(this.starKey(b)) ?? b.stars ?? 0) : (b.stars ?? 0);
-          const row = h(
-            'div',
-            {
-              class: `diff-row${isSel ? ' selected' : ''}`,
-              onclick: () => (isSel ? this.play() : this.game.select(set, b)),
-              ondblclick: () => this.play(),
-            },
-            h('span', { class: 'star-badge', style: { background: starColour(stars), color: starTextColour(stars) } }, `★ ${stars.toFixed(2)}`),
-            h('span', { class: 'name' }, b.difficultyName || 'Normal'),
-            h('span', { class: 'mode' }, b.rulesetId !== this.game.ruleset.id ? `convert` : RULESET_NAMES[b.rulesetId]),
-          );
-          list.appendChild(row);
-        }
-        this.carousel.appendChild(list);
-      }
+    if (modsChanged) {
+      const oldList = this.lastModsList;
+      this.lastModsKey = modsKey;
+      this.lastModsList = this.game.mods.list;
+      this.storeLastActiveRateAdjustMod();
+      this.carousel.refreshStarRatings();
+      this.titleWedge.updateMods();
+      this.detailsArea.modsChanged();
+      this.filterControl.modsChanged(oldList, this.lastModsList);
+      this.updateFooterMods();
     }
-    this.carousel.scrollTop = scrollTop;
-    if (selectedEl) {
-      const el = selectedEl;
-      requestAnimationFrame(() => {
-        const r = el.getBoundingClientRect();
-        const cr = this.carousel.getBoundingClientRect();
-        if (r.top < cr.top + 20 || r.bottom > cr.bottom - 120) this.carousel.scrollTop += r.top - cr.top - cr.height / 3;
-      });
+    if (workingKey !== this.lastWorkingKey) {
+      this.lastWorkingKey = workingKey;
+      this.updateVariousState();
     }
   }
 
-  private displayTitle(e: BeatmapEntry): string {
-    return settings.get('ui.preferUnicode', false) && e.titleUnicode ? e.titleUnicode : e.title;
+  /** SongSelect.updateVariousState (Beatmap.ValueChanged) */
+  private updateVariousState(): void {
+    if (!this.current) return;
+    this.ensureGlobalBeatmapValid();
+    this.updateWedgeVisibility();
+    this.titleWedge.update();
+    this.detailsArea.refresh();
+    this.optionsButton.hidePopover();
+    this.optionsButton.enabled = this.game.working != null;
+    this.optionsButton.updateDisplay();
+    this.updateFooterMods();
   }
 
-  private displayArtist(e: BeatmapEntry): string {
-    return settings.get('ui.preferUnicode', false) && e.artistUnicode ? e.artistUnicode : e.artist;
-  }
-
-  private starKey(e: BeatmapEntry): string {
-    return `${e.hash}|${this.game.ruleset.id}|${this.game.mods.toString()}`;
-  }
-
-  private renderInfo(): void {
-    clear(this.info);
-    const w = this.game.working;
-    if (!w) return;
-    const e = w.entry;
-    const mods = this.game.mods;
+  private updateFooterMods(): void {
     const r = this.game.ruleset;
-    const base = Object.assign(new BeatmapDifficulty(), {
-      circleSize: e.circleSize,
-      approachRate: e.approachRate,
-      overallDifficulty: e.overallDifficulty,
-      drainRate: e.drainRate,
-    });
-    const adjusted = applyCommonDifficultyMods(applyDifficultyAdjust({ difficulty: base }, mods).difficulty, mods, r.id !== 3 && r.id !== 1);
-    const rate = mods.rate;
-    const key = this.starKey(e);
-    const stars = this.starCache.get(key) ?? (mods.isEmpty && e.rulesetId === r.id ? e.stars : undefined);
-    if (stars === undefined) this.computeStars(w.set, e, key);
-
-    const bar = (label: string, value: number, baseValue: number, max = 10) =>
-      h(
-        'div',
-        { class: 'stat' },
-        h('div', { class: 'stat-label' }, label),
-        h('div', { class: 'stat-bar' }, h('div', { class: value > baseValue + 0.01 ? 'boosted' : value < baseValue - 0.01 ? 'reduced' : '', style: { width: `${Math.min(100, (value / max) * 100)}%` } })),
-        h('div', { class: 'stat-value' }, value.toFixed(1).replace(/\.0$/, '')),
-      );
-
-    const isMania = r.id === 3;
-    const keyCount = e.rulesetId === 3 ? Math.round(e.circleSize) : undefined;
-    const details = h(
-      'div',
-      { class: 'panel' },
-      h('div', { class: 'ss-title' }, this.displayTitle(e)),
-      h('div', { class: 'ss-artist' }, this.displayArtist(e)),
-      h(
-        'div',
-        { class: 'ss-diffname' },
-        h('span', { class: 'star-badge', style: { background: starColour(stars ?? 0), color: starTextColour(stars ?? 0) } }, stars === undefined ? '★ …' : `★ ${stars.toFixed(2)}`),
-        h('b', null, e.difficultyName),
-        h('span', { style: { color: 'var(--fg-dim)' } }, `mapped by ${e.creator}`),
-      ),
-      h(
-        'div',
-        { class: 'stats-grid' },
-        stat('Length', formatTime(e.length / rate)),
-        stat('BPM', String(Math.round(e.bpm * rate))),
-        stat('Objects', formatNumber(e.objectCount)),
-        isMania || r.id === 1 ? (keyCount ? stat('Keys', String(keyCount)) : null) : bar('Circle size', adjusted.circleSize, e.circleSize),
-        r.id === 0 || r.id === 2 ? bar('Approach rate', adjusted.approachRate, e.approachRate) : null,
-        bar('Accuracy', adjusted.overallDifficulty, e.overallDifficulty),
-        bar('HP drain', adjusted.drainRate, e.drainRate),
-      ),
-      e.source ? h('div', { style: { marginTop: '10px', color: 'var(--fg-dim)', fontSize: '13px' } }, `Source: ${e.source}`) : null,
-      !w.set.builtIn
-        ? h(
-            'div',
-            { style: { marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' } },
-            h('button', { class: 'btn small ghost', onclick: () => this.deleteSet(w.set) }, 'Delete set'),
-            h('button', { class: 'btn small ghost', onclick: () => this.playAuto() }, 'Watch autoplay'),
-          )
-        : h('div', { style: { marginTop: '12px' } }, h('button', { class: 'btn small ghost', onclick: () => this.playAuto() }, 'Watch autoplay')),
-    );
-    const board = h('div', { class: 'panel leaderboard' }, h('div', { class: 'leaderboard-title' }, 'Local scores'), h('div', { class: 'empty-state', style: { padding: '10px' } }, 'Loading…'));
-    this.info.append(details, board);
-    void this.loadScores(e, board);
-  }
-
-  private computeStars(set: BeatmapSetRecord, e: BeatmapEntry, key: string): void {
-    const job = ++this.starJob;
-    const r = this.game.ruleset;
-    const mods = this.game.mods;
-    if (!r.starRating) return;
-    setTimeout(async () => {
-      if (job !== this.starJob) return;
-      try {
-        const working = this.game.working;
-        if (!working || working.entry.hash !== e.hash) return;
-        const beatmap = await working.getBeatmap();
-        if (!r.canConvert(beatmap)) return;
-        const rulesetMods = mods.forRuleset(r.shortName, r.availableMods);
-        const value = r.starRating!(r.createPlayable(applyDifficultyAdjust(beatmap, rulesetMods), rulesetMods));
-        this.starCache.set(key, value);
-        if (mods.isEmpty && e.rulesetId === r.id && e.stars === undefined) e.stars = value;
-        if (job === this.starJob) {
-          this.renderInfo();
-          this.renderCarousel();
-        }
-        void set;
-      } catch {
-        /* ignore */
-      }
-    }, 30);
-  }
-
-  private async loadScores(e: BeatmapEntry, board: HTMLElement): Promise<void> {
-    let scores: Awaited<ReturnType<typeof Database.getScores>> = [];
+    const mods = this.game.mods.forRuleset(r.shortName, r.availableMods);
+    let multiplier = 1;
     try {
-      scores = await Database.getScores(e.hash);
+      multiplier = r.scoreMultiplier(mods);
     } catch {
       /* ignore */
     }
-    const list = scores.filter(s => s.rulesetId === this.game.ruleset.id).sort((a, b) => b.totalScore - a.totalScore).slice(0, 10);
-    board.lastElementChild?.remove();
-    if (list.length === 0) {
-      board.appendChild(h('div', { class: 'empty-state', style: { padding: '10px' } }, 'No scores yet. Be the first!'));
-      return;
+    this.modsButton.setMods(mods, multiplier);
+  }
+
+  private renderRulesetTabs(): void {
+    this.rulesetTabs.textContent = '';
+    for (const r of availableRulesets()) {
+      const active = r === this.game.ruleset;
+      const b = h('button', { class: `ss-ruleset${active ? ' active' : ''}`, title: RULESET_DISPLAY_NAMES[r.id] ?? r.name, onclick: () => this.game.setRuleset(r) }, rulesetIcon(r.id, 20), h('span', null, RULESET_DISPLAY_NAMES[r.id] ?? r.name));
+      this.rulesetTabs.appendChild(b);
     }
-    const wrap = h('div');
-    for (const s of list) {
-      const rank = s.rank as ScoreRank;
-      const watch = async () => {
-        if (!s.hasReplay || s.id == null) return;
-        const replay = await Database.getReplay(s.id);
-        const w = this.game.working;
-        if (!replay || !w) return;
-        this.game.push(new PlayerScreen(this.game, w, this.game.ruleset, new ModSet(s.mods, s.modSettings ?? replay.modSettings ?? {}), replay));
-      };
-      wrap.appendChild(
-        h(
-          'div',
-          { class: 'score-row', style: s.hasReplay ? { cursor: 'pointer' } : {}, title: s.hasReplay ? 'Click to watch the replay' : undefined, onclick: watch },
-          h('div', { class: 'rank', style: { color: RANK_COLOURS[rank] ?? '#fff' } }, RANK_DISPLAY[rank] ?? s.rank),
-          h(
-            'div',
-            null,
-            h('div', null, h('b', null, formatNumber(s.totalScore)), ` · ${(s.accuracy * 100).toFixed(2)}% · ${s.maxCombo}x`),
-            h('div', { class: 'sub' }, `${s.player} · ${new Date(s.date).toLocaleDateString()}${s.mods.length ? ` · ${s.mods.map(m => new ModSet(s.mods, s.modSettings ?? {}).label(m)).join(' ')}` : ''}`),
-          ),
-          h('div', { style: { color: 'var(--fg-dim)', fontWeight: '700', textAlign: 'right' } }, s.pp ? `${Math.round(s.pp)}pp` : '', s.hasReplay ? h('div', { class: 'sub' }, '▶ replay') : null),
-        ),
-      );
+  }
+
+  // ------------------------------------------------------------------ selection handling
+
+  private checkBeatmapValidForSelection(b: FilterBeatmap | null): boolean {
+    if (!b) return false;
+    const r = this.game.ruleset;
+    if (!allowGameplayWithRuleset(b.ruleset, { shortName: r.shortName, onlineId: r.id }, this.filterControl.allowConverts)) return false;
+    if (b.hidden) return false;
+    return this.model.recordFor(b.set.id) != null;
+  }
+
+  private debounceQueueSelection(b: FilterBeatmap): void {
+    this.debounceQueuedSelection = b;
+    this.debounceElapsed = 0;
+  }
+
+  private updateDebounce(elapsed: number): void {
+    if (!this.debounceQueuedSelection) return;
+    // When a key is being held, assume the user is traversing the carousel using key repeat.
+    const interval = this.keysHeld.size > 0 ? SELECTION_DEBOUNCE * 2 : SELECTION_DEBOUNCE;
+    this.debounceElapsed += elapsed;
+    if (this.debounceElapsed >= interval) this.performDebounceSelection();
+  }
+
+  private performDebounceSelection(): void {
+    const b = this.debounceQueuedSelection;
+    if (!b) return;
+    this.debounceQueuedSelection = null;
+    this.debounceElapsed = 0;
+    const w = this.game.working;
+    if (w && w.set.id === b.set.id && w.entry.hash === b.id) return;
+    if (!this.checkBeatmapValidForSelection(b)) return;
+    const src = this.model.sources.get(b);
+    if (src) this.game.select(src.set, src.entry);
+  }
+
+  private cancelDebounceSelection(): void {
+    this.debounceQueuedSelection = null;
+    this.debounceElapsed = 0;
+  }
+
+  /** queueBeatmapSelection */
+  private queueBeatmapSelection(gb: GroupedBeatmap): void {
+    if (!this.current) return;
+    this.carousel.currentGroupedBeatmap = gb;
+    this.debounceQueueSelection(gb.beatmap);
+  }
+
+  /** requestRecommendedSelection: DifficultyRecommender has no user statistics offline, so the first difficulty is used. */
+  private requestRecommendedSelection(list: GroupedBeatmap[]): void {
+    if (list.length === 0) return;
+    this.queueBeatmapSelection(list[0]);
+  }
+
+  private ensureGlobalBeatmapValid(): boolean {
+    if (!this.current) return false;
+    this.performDebounceSelection();
+    if (this.carousel.isFiltering || this.filterDebouncePending) return false;
+
+    const current = this.workingFilterBeatmap();
+    if (this.checkBeatmapValidForSelection(current)) {
+      this.carousel.currentBeatmap = current;
+      return true;
     }
-    board.appendChild(wrap);
+
+    // If there was no beatmap selected, pick a random one.
+    if (!this.game.working || !current) {
+      const valid = this.carousel.nextRandom();
+      this.performDebounceSelection();
+      return valid;
+    }
+
+    // In the case a difficulty was hidden or removed, prefer selecting another difficulty from the same set.
+    const validBeatmaps = current.set.beatmaps.filter(b => this.checkBeatmapValidForSelection(b));
+    if (validBeatmaps.length > 0) {
+      this.carousel.currentBeatmap = validBeatmaps[0];
+      this.debounceQueueSelection(validBeatmaps[0]);
+      return true;
+    }
+
+    // If all else fails, select something random (lazer: the default beatmap, which in turn triggers a random selection).
+    const valid = this.carousel.nextRandom();
+    this.performDebounceSelection();
+    return valid;
   }
 
-  private async deleteSet(set: BeatmapSetRecord): Promise<void> {
-    if (!(await confirmDialog(this.game, `Delete "${set.beatmaps[0].title}" and all its difficulties?`, 'Delete'))) return;
-    this.game.working = null;
-    await this.game.library.remove(set.id);
-    this.game.toast('Beatmap set deleted');
+  /** SelectAndRun(beatmap, OnStart) */
+  private selectAndRun(b: FilterBeatmap): void {
+    if (!this.current) return;
+    if (!this.checkBeatmapValidForSelection(b)) return;
+    this.cancelDebounceSelection();
+    const src = this.model.sources.get(b);
+    if (!src) return;
+    this.game.select(src.set, src.entry);
+    if (!this.game.working) return;
+    this.onStart();
   }
 
-  // ------------------------------------------------------------------ navigation
-
-  private flat(): { set: BeatmapSetRecord; entry: BeatmapEntry }[] {
-    return this.visible.flatMap(s => s.beatmaps.map(entry => ({ set: s.set, entry })));
-  }
-
-  private moveDifficulty(delta: number): void {
-    const list = this.flat();
-    const w = this.game.working;
-    const idx = list.findIndex(x => x.entry.hash === w?.entry.hash && x.set.id === w?.set.id);
-    const next = list[(idx + delta + list.length) % list.length];
-    if (next) this.game.select(next.set, next.entry);
-  }
-
-  private moveSet(delta: number): void {
-    const w = this.game.working;
-    const idx = this.visible.findIndex(s => s.set.id === w?.set.id);
-    const next = this.visible[(idx + delta + this.visible.length) % this.visible.length];
-    if (next) this.game.select(next.set, next.beatmaps[0]);
-  }
-
-  private random(): void {
-    if (this.visible.length === 0) return;
-    const s = this.visible[Math.floor(Math.random() * this.visible.length)];
-    this.game.select(s.set, s.beatmaps[Math.floor(Math.random() * s.beatmaps.length)]);
-  }
-
-  private play(autoplay = false): void {
+  /** SoloSongSelect.OnStart */
+  private onStart(): void {
     const w = this.game.working;
     if (!w) return;
     const r = this.game.ruleset;
+    this.modsAtGameplayStart = this.game.mods;
     let mods = this.game.mods.forRuleset(r.shortName, r.availableMods);
-    if (autoplay && !mods.has('AT')) mods = mods.toggle('AT');
+    if (this.ctrlForStart) {
+      if (!r.availableMods.includes('AT')) {
+        this.game.toast('The current ruleset doesn\'t have an autoplay mod available!', 'error');
+        return;
+      }
+      if (!mods.has('AT')) mods = mods.toggle('AT');
+      this.game.setMods(mods);
+    }
+    this.ctrlForStart = false;
+    setLastPlayed(w.entry.hash, Date.now());
     this.game.playUiSample('menu-confirm', 0.7);
     this.game.push(new PlayerScreen(this.game, w, r, mods));
   }
 
-  private playAuto(): void {
-    this.play(true);
+  // ------------------------------------------------------------------ filtering
+
+  private criteriaChanged(criteria: FilterCriteria): void {
+    clearTimeout(this.filterDebounce);
+    const isFirstFilter = this.firstFilter;
+    this.firstFilter = false;
+    const isSelectionValid = this.checkBeatmapValidForSelection(this.workingFilterBeatmap());
+    this.filterDebouncePending = true;
+    this.filterDebounce = window.setTimeout(
+      () => {
+        this.filterDebouncePending = false;
+        this.carousel.filter(criteria, isFirstFilter || !isSelectionValid);
+      },
+      isFirstFilter || !isSelectionValid ? 0 : FILTER_DELAY,
+    );
+  }
+
+  /** newItemsPresented */
+  private newItemsPresented(): void {
+    if (!this.carousel.criteria) return;
+    this.carouselItemsPresented = true;
+    this.updateNoResultsPlaceholder();
+    const count = this.carousel.matchedBeatmapsCount;
+    this.filterControl.statusText = `${count.toLocaleString('en-US')} match${count === 1 ? '' : 'es'}`;
+    if (this.debounceQueuedSelection == null) this.ensureGlobalBeatmapValid();
+    this.updateWedgeVisibility();
+  }
+
+  private updateNoResultsPlaceholder(): void {
+    const count = this.carousel.matchedBeatmapsCount;
+    const ease = cssEasing(Easing.OutPow10);
+    if (count === 0) {
+      this.noResults.show(this.carousel.criteria!);
+      this.rightGradient.style.transition = `width 1000ms ${ease}`;
+      this.rightGradient.style.width = '300%';
+    } else {
+      this.noResults.hide();
+      this.rightGradient.style.transition = `width 400ms ${ease}`;
+      this.rightGradient.style.width = '100%';
+    }
+  }
+
+  private updateWedgeVisibility(): void {
+    if (!this.carouselItemsPresented && !this.checkBeatmapValidForSelection(this.workingFilterBeatmap())) return;
+    const show = !this.carousel.visuallyFocusSelected;
+    this.titleWedge.setVisible(show);
+    this.detailsArea.setVisible(show);
+    this.filterControl.setVisible(show);
+  }
+
+  // ------------------------------------------------------------------ scoping
+
+  private scopeToBeatmapSet(set: GroupedBeatmapSet['beatmapSet']): void {
+    this.beforeScopedSelection = this.carousel.currentGroupedBeatmap;
+    const m = set.metadata;
+    this.filterControl.setScopedBeatmapSet(set, `${m.artist} - ${m.title} (${m.author})`);
+  }
+
+  private unscopeBeatmapSet(restorePreviousSelection: boolean): void {
+    if (!this.filterControl.scopedBeatmapSet) return;
+    if (this.beforeScopedSelection && restorePreviousSelection) this.queueBeatmapSelection(this.beforeScopedSelection);
+    this.beforeScopedSelection = null;
+    this.filterControl.setScopedBeatmapSet(null, '');
+  }
+
+  // ------------------------------------------------------------------ background reveal
+
+  private onPointerDown(e: PointerEvent): void {
+    if (e.button !== 0 || e.pointerType === 'touch') return;
+    const t = e.target as HTMLElement;
+    // Only when the screen itself is the hovered target (not panels, wedges, filter control or the footer).
+    if (t.closest('.p, .title-wedge, .details-area, .filter-control, .screen-footer, .ss-toolbar, .no-results, .carousel-scrollbar, .ss-context-menu')) return;
+    if (this.revealTimer) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const move = (ev: PointerEvent) => {
+      if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 8) {
+        clearTimeout(this.revealTimer);
+        this.revealTimer = 0;
+        window.removeEventListener('pointermove', move);
+      }
+    };
+    window.addEventListener('pointermove', move);
+    this.revealTimer = window.setTimeout(() => {
+      window.removeEventListener('pointermove', move);
+      if (this.carousel.absoluteScrolling) return;
+      this.revealed = true;
+      const ease = cssEasing(Easing.OutQuint);
+      this.mainContent.style.transition = `transform 600ms ${ease}, opacity 200ms ${ease}`;
+      this.mainContent.style.transform = 'scale(1.2)';
+      this.mainContent.style.opacity = '0';
+      this.footer.setVisible(false);
+    }, REVEAL_BACKGROUND_DELAY);
+  }
+
+  private readonly onPointerUp = (): void => this.restoreBackground();
+
+  private restoreBackground(): void {
+    if (!this.revealTimer) return;
+    clearTimeout(this.revealTimer);
+    this.revealTimer = 0;
+    if (this.revealed) {
+      this.revealed = false;
+      const ease = cssEasing(Easing.OutQuint);
+      this.mainContent.style.transition = `transform 500ms ${ease}, opacity 500ms ${ease}`;
+      this.mainContent.style.transform = '';
+      this.mainContent.style.opacity = '1';
+      this.footer.setVisible(true);
+    }
+  }
+
+  // ------------------------------------------------------------------ mods
+
+  private toggleModSelect(): void {
+    if (this.game.hasOverlay) {
+      this.game.closeOverlay();
+      return;
+    }
+    openModSelect(this.game, { footer: this.footer, ownerButton: this.modsButton, scale: this.drawSize.scale });
+  }
+
+  private storeLastActiveRateAdjustMod(): void {
+    const rate = this.game.mods.list.find(a => ['DT', 'NC', 'HT', 'DC'].includes(a));
+    if (rate) this.lastActiveRateAdjustMod = { acronym: rate, settings: { ...(this.game.mods.settings[rate] ?? {}) } };
+  }
+
+  /** ModSpeedHotkeyHandler.ChangeSpeed */
+  private changeSpeed(delta: number): boolean {
+    const r = this.game.ruleset;
+    const mods = this.game.mods.forRuleset(r.shortName, r.availableMods);
+    const rateMod = mods.list.find(a => ['DT', 'NC', 'HT', 'DC'].includes(a));
+    const targetSpeed = (rateMod ? mods.setting<number>(rateMod, 'speed') : 1) + delta;
+    const withoutRate = () => {
+      let m = mods;
+      for (const a of ['DT', 'NC', 'HT', 'DC']) if (m.has(a)) m = m.toggle(a);
+      return m;
+    };
+    const toast = (speed: number) => this.game.toast(`Playback speed: ${speed.toFixed(2)}x`);
+
+    if (Math.abs(targetSpeed - 1) <= 0.005) {
+      this.game.setMods(withoutRate());
+      toast(targetSpeed);
+      return true;
+    }
+
+    const last = this.lastActiveRateAdjustMod;
+    const target = last && (last.acronym === 'DC' || last.acronym === 'NC') ? (targetSpeed < 1 ? 'DC' : 'NC') : targetSpeed < 1 ? 'HT' : 'DT';
+    if (!r.availableMods.includes(target)) return false;
+
+    let next = withoutRate().toggle(target);
+    // Copy every other setting of the last active rate mod (e.g. adjust pitch).
+    if (last) for (const [k, v] of Object.entries(last.settings)) if (k !== 'speed' && (target === 'DT' || target === 'HT')) next = next.withSetting(target, k, v);
+    // SpeedChange is a bounded bindable (DT/NC 1.01..2, HT/DC 0.5..0.99, precision 0.01).
+    const [min, max] = target === 'DT' || target === 'NC' ? [1.01, 2] : [0.5, 0.99];
+    const speed = Math.round(Math.max(min, Math.min(max, targetSpeed)) * 100) / 100;
+    next = next.withSetting(target, 'speed', speed);
+    this.game.setMods(next);
+    toast(speed);
+    return true;
+  }
+
+  // ------------------------------------------------------------------ beatmap management
+
+  private async deleteSet(record: BeatmapSetRecord): Promise<void> {
+    if (record.builtIn) {
+      this.game.toast("The built-in demo beatmap can't be deleted", 'error');
+      return;
+    }
+    const e = record.beatmaps[0];
+    // BeatmapDeleteDialog
+    if (!(await confirmDialog(this.game, `Confirm deletion of ${e.artist} - ${e.title} (${e.creator})`, 'Yes. Totally. Delete it.'))) return;
+    if (this.game.working?.set.id === record.id) this.game.working = null;
+    await this.game.library.remove(record.id);
+    this.game.toast('Beatmap set deleted');
+  }
+
+  /** BeatmapClearScoresDialog */
+  private async clearLocalScores(hash: string): Promise<void> {
+    if (!(await confirmDialog(this.game, 'All local scores on this beatmap will be deleted!', 'Yes. Please.'))) return;
+    try {
+      const scores = await Database.getScores(hash);
+      for (const s of scores) if (s.id != null) await Database.deleteScore(s.id);
+    } catch {
+      /* ignore */
+    }
+    this.localRanks.clear();
+    this.detailsArea.refresh();
+    this.game.toast('Local scores cleared');
+  }
+
+  /** LocalScoreDeleteDialog */
+  private async deleteScore(s: ScoreRecord): Promise<void> {
+    if (s.id == null) return;
+    if (!(await confirmDialog(this.game, `Are you sure you want to delete this local score? (${s.player}, ${Math.round(s.totalScore).toLocaleString('en-US')})`, 'Yes. Please.'))) return;
+    try {
+      await Database.deleteScore(s.id);
+    } catch {
+      /* ignore */
+    }
+    this.localRanks.clear();
+    this.detailsArea.refresh();
+  }
+
+  private async watchReplay(s: ScoreRecord): Promise<void> {
+    if (!s.hasReplay || s.id == null) return;
+    const replay = await Database.getReplay(s.id).catch(() => undefined);
+    const w = this.game.working;
+    if (!replay || !w) return;
+    this.game.push(new PlayerScreen(this.game, w, this.game.ruleset, new ModSet(s.mods, s.modSettings ?? replay.modSettings ?? {}), replay));
+  }
+
+  /** SoloSongSelect.GetForwardActions */
+  private forwardActions(b: FilterBeatmap): MenuItem[] {
+    const played = getLastPlayed(b.id) != null;
+    const src = this.model.sources.get(b);
+    return [
+      { text: 'Play', type: 'highlighted', icon: 'check', action: () => this.selectAndRun(b) },
+      { text: '', spacer: true },
+      played
+        ? { text: 'Remove from played', icon: 'timesCircle', action: () => (setLastPlayed(b.id, null), this.libraryChanged()) }
+        : { text: 'Mark as played', icon: 'timesCircle', action: () => (setLastPlayed(b.id, Date.now()), this.libraryChanged()) },
+      { text: 'Clear all local scores', type: 'destructive', icon: 'eraser', action: () => void this.clearLocalScores(src?.entry.hash ?? b.id) },
+    ];
+  }
+
+  private optionsEntries(): OptionsEntry[] {
+    const b = this.workingFilterBeatmap();
+    const w = this.game.working;
+    if (!w || !b) return [];
+    const e = w.entry;
+    const entries: OptionsEntry[] = [
+      { header: 'For all difficulties', context: `${e.artist} - ${e.title} (${e.creator})` },
+      { text: 'Delete...', icon: 'trash', colour: OsuColour.Red1, action: () => void this.deleteSet(w.set) },
+      { header: 'For selected difficulty', context: e.difficultyName },
+    ];
+    for (const item of this.forwardActions(b)) {
+      if (item.spacer) entries.push({ spacer: true });
+      else entries.push({ text: item.text, icon: item.icon, colour: item.type === 'destructive' ? OsuColour.Red1 : undefined, action: item.action });
+    }
+    return entries;
+  }
+
+  private showPanelContextMenu(item: CarouselItem, e: MouseEvent): void {
+    const m = item.model;
+    let items: MenuItem[] = [];
+    if (m instanceof GroupDefinition) items = [{ text: item.isExpanded ? 'Collapse' : 'Expand', type: 'highlighted', action: () => this.carousel.activate(item) }];
+    else if (m instanceof GroupedBeatmapSet) {
+      const record = this.model.recordFor(m.beatmapSet.id);
+      if (!item.isExpanded) items.push({ text: 'Expand', type: 'highlighted', action: () => this.carousel.activate(item) }, { text: '', spacer: true });
+      if (record) items.push({ text: 'Delete...', type: 'destructive', action: () => void this.deleteSet(record) });
+    } else if (m instanceof GroupedBeatmap) items = this.forwardActions(m.beatmap);
+    if (items.length > 0) showContextMenu(e.clientX, e.clientY, items);
+  }
+
+  // ------------------------------------------------------------------ local ranks (PanelLocalRankDisplay / RankAchieved grouping)
+
+  private getLocalRank(hash: string, cb: (r: ScoreRank | null) => void): void {
+    const key = `${hash}|${this.game.ruleset.id}`;
+    if (this.localRanks.has(key)) {
+      cb(this.localRanks.get(key)!);
+      return;
+    }
+    const waiters = this.localRankWaiters.get(key);
+    if (waiters) {
+      waiters.push(cb);
+      return;
+    }
+    this.localRankWaiters.set(key, [cb]);
+    const rulesetId = this.game.ruleset.id;
+    void Database.getScores(hash)
+      .catch(() => [] as ScoreRecord[])
+      .then(scores => {
+        const best = scores.filter(s => s.rulesetId === rulesetId).sort((a, b) => b.totalScore - a.totalScore || a.date - b.date)[0];
+        const rank = (best?.rank as ScoreRank | undefined) ?? null;
+        this.localRanks.set(key, rank);
+        const ws = this.localRankWaiters.get(key) ?? [];
+        this.localRankWaiters.delete(key);
+        ws.forEach(w => w(rank));
+      });
+  }
+
+  /** GetBeatmapInfoGuidToTopRankMapping (from the ranks loaded so far). */
+  private topRankMapping(): Map<string, ScoreRank> {
+    const out = new Map<string, ScoreRank>();
+    const suffix = `|${this.game.ruleset.id}`;
+    for (const [k, v] of this.localRanks) if (v && k.endsWith(suffix)) out.set(k.slice(0, -suffix.length), v);
+    return out;
+  }
+
+  // ------------------------------------------------------------------ input
+
+  /** Keys the search box would otherwise swallow (lazer's InnerTextBox doesn't handle left/right arrows, page up/down, shift+delete). */
+  private onSearchKeyDown(e: KeyboardEvent): void {
+    if (['ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'].includes(e.code) || (e.code === 'Delete' && e.shiftKey)) {
+      if (this.onKeyDown(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    } else if (e.code === 'Escape') {
+      if (this.filterControl.scopedBeatmapSet) return;
+      if (this.filterControl.search.value) {
+        this.filterControl.search_('');
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
   }
 
   onKeyDown(e: KeyboardEvent): boolean {
+    this.keysHeld.add(e.code);
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.randomButton.setShift(true);
+    if (this.optionsButton.handleKey(e)) return true;
+    const typing = document.activeElement === this.filterControl.search;
+
     switch (e.code) {
-      case 'ArrowDown':
-        this.moveDifficulty(1);
-        return true;
       case 'ArrowUp':
-        this.moveDifficulty(-1);
+      case 'ArrowDown': {
+        const dir = e.code === 'ArrowUp' ? -1 : 1;
+        if (e.ctrlKey || e.metaKey) {
+          // GlobalAction.IncreaseModSpeed / DecreaseModSpeed
+          return this.changeSpeed(dir < 0 ? 0.05 : -0.05);
+        }
+        this.carousel.selectNext(dir);
         return true;
-      case 'ArrowRight':
-        if (document.activeElement === this.search && this.search.value) return false;
-        this.moveSet(1);
-        return true;
+      }
       case 'ArrowLeft':
-        if (document.activeElement === this.search && this.search.value) return false;
-        this.moveSet(-1);
+      case 'ArrowRight': {
+        const dir = e.code === 'ArrowLeft' ? -1 : 1;
+        if (e.shiftKey) this.carousel.expandNextGroup(dir);
+        else this.carousel.activateNextSet(dir);
+        return true;
+      }
+      case 'PageUp':
+      case 'PageDown':
+        this.carousel.selectPage(e.code === 'PageUp' ? -1 : 1);
+        return true;
+      case 'Home':
+      case 'End':
+        if (typing) return false;
+        this.carousel.selectEdge(e.code === 'Home' ? -1 : 1);
         return true;
       case 'Enter':
       case 'NumpadEnter':
-        this.play(e.ctrlKey);
+        if (e.repeat) return true;
+        if (e.shiftKey) {
+          this.carousel.toggleCurrentGroup();
+          return true;
+        }
+        this.ctrlForStart = e.ctrlKey || e.metaKey;
+        // Carousel.OnKeyDown handles Enter first (activating the keyboard selection); otherwise GlobalAction.Select.
+        if (!this.carousel.activateSelection()) {
+          this.ensureGlobalBeatmapValid();
+          const b = this.workingFilterBeatmap();
+          if (b) this.selectAndRun(b);
+        }
+        return true;
+      case 'Space':
+        if (typing) return false;
+        this.ctrlForStart = false;
+        if (!this.carousel.activateSelection()) {
+          const b = this.workingFilterBeatmap();
+          if (b) this.selectAndRun(b);
+        }
         return true;
       case 'F1':
-        openModSelect(this.game);
+        if (!e.repeat) this.modsButton.triggerClick();
         return true;
       case 'F2':
-        this.random();
+        if (!e.repeat) this.randomButton.press(e.shiftKey);
+        return true;
+      case 'F3':
+        if (!e.repeat && this.game.working) this.optionsButton.triggerClick();
+        return true;
+      case 'Backspace':
+        if (typing) return false;
+        // GlobalAction.DeselectAllMods
+        this.game.setMods(this.game.mods.forRuleset(this.game.ruleset.shortName, []));
         return true;
       case 'Delete':
-        if (e.shiftKey && this.game.working && !this.game.working.set.builtIn) {
-          void this.deleteSet(this.game.working.set);
+        if (e.shiftKey && !e.repeat) {
+          if (this.game.working) void this.deleteSet(this.game.working.set);
           return true;
         }
         return false;
     }
-    if (e.ctrlKey && e.code === 'KeyO') {
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyO') {
       openSettings(this.game);
       return true;
     }
+    if (!typing && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // HoldFocus: typing anywhere goes to the search box.
+      this.filterControl.search.focus({ preventScroll: true });
+      return false;
+    }
+    return false;
+  }
+
+  onKeyUp(e: KeyboardEvent): boolean {
+    this.keysHeld.delete(e.code);
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.randomButton.setShift(false);
     return false;
   }
 }
 
-function stat(label: string, value: string): HTMLElement {
-  return h('div', { class: 'stat' }, h('div', { class: 'stat-label' }, label), h('div', { class: 'stat-value' }, value));
-}
-
-const thumbs = new Map<string, string>();
-function thumbUrl(id: string, blob: Blob): string {
-  let u = thumbs.get(id);
-  if (!u) {
-    u = URL.createObjectURL(blob);
-    thumbs.set(id, u);
-  }
+function backgroundUrl(set: BeatmapSetRecord): string | null {
+  let u = bgUrls.get(set.id);
+  if (u) return u;
+  // PanelBeatmapSet: s.Beatmaps.MinBy(b => b.OnlineID)
+  const first = [...set.beatmaps].sort((a, b) => a.onlineId - b.onlineId)[0];
+  const blob = first ? findFile(set.files, first.backgroundFile) : undefined;
+  if (!blob) return null;
+  u = URL.createObjectURL(blob);
+  bgUrls.set(set.id, u);
   return u;
 }
+
+void MODS;
+void css;
+void tween;

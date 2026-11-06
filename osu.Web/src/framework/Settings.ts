@@ -36,7 +36,7 @@ export const DEFAULT_SETTINGS = {
   'taiko.touchControlScheme': 'KDDK',
   'taiko.hitAnimations': true,
   'taiko.rateAdjustedHitAnimation': true,
-  'taiko.drumCombo': true,
+  'taiko.drumCombo': false, // not a lazer feature (stable-style combo on the drum)
   'fruits.hitLighting': true,
   'fruits.positionalHitsoundsLevel': 0.2,
   'fruits.flashlightSizeMultiplier': 1,
