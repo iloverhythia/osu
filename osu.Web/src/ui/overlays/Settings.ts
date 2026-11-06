@@ -6,6 +6,7 @@ import { availableRulesets } from '../../game/rulesets';
 import type { Ruleset } from '../../game/rulesets/Ruleset';
 import { clear, h, keyLabel } from '../dom';
 import type { Game } from '../Game';
+import { skinSettingsSection } from './SkinSettings';
 
 function slider(label: string, key: string, min: number, max: number, step: number, format: (v: number) => string, hint?: string): HTMLElement {
   const value = h('span', { class: 'value' }, format(settings.get(key, 0)));
@@ -151,6 +152,10 @@ export function openSettings(game: Game): void {
     toggle('Combo break sound', 'gameplay.comboBreakSound'),
     toggle('Disable mouse buttons during gameplay', 'gameplay.disableMouseButtons'),
 
+    toggle('Storyboards & videos', 'gameplay.storyboard'),
+    toggle('Beatmap skins', 'skin.beatmapSkins', 'Use skin elements and hitsounds included with beatmaps.'),
+    skinSettingsSection(game),
+
     h('h3', null, 'osu!'),
     slider('Cursor size', 'osu.cursorSize', 0.5, 2, 0.05, v => `${v.toFixed(2)}x`),
     toggle('Cursor trail', 'osu.cursorTrail'),
@@ -167,11 +172,19 @@ export function openSettings(game: Game): void {
     ]),
 
     h('h3', null, 'osu!taiko'),
+    toggle('Hit animations', 'taiko.hitAnimations'),
+    toggle('Rate-adjusted hit animation', 'taiko.rateAdjustedHitAnimation'),
+    toggle('Show combo on drum', 'taiko.drumCombo'),
     choice('Touch control scheme', 'taiko.touchControlScheme', [
       ['KDDK', 'KDDK'],
       ['DDKK', 'DDKK'],
       ['KKDD', 'KKDD'],
     ]),
+
+    h('h3', null, 'osu!catch'),
+    toggle('Hit lighting', 'fruits.hitLighting'),
+    slider('Positional hitsounds', 'fruits.positionalHitsoundsLevel', 0, 1, 0.05, pct),
+    slider('Touch zone width', 'fruits.touchZoneWidth', 0.05, 0.5, 0.01, pct),
 
     h('h3', null, 'Graphics'),
     slider('Render resolution', 'graphics.renderScale', 0.5, 1, 0.05, pct, 'Lower this if gameplay stutters.'),

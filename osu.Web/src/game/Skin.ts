@@ -38,17 +38,24 @@ export const COLOURS = {
 };
 
 export interface Skin {
+  /** User skin (.osk) and beatmap skin, highest priority first. Empty when using the default procedural skin. */
+  sources: import('./skinning').LoadedSkin[];
   comboColours: RGB[];
   comboColour(index: number): RGB;
   sliderTrackOverride?: RGB;
   sliderBorder?: RGB;
 }
 
-export function createSkin(beatmapColours: RGB[] | null, custom?: Record<string, [number, number, number, number]>): Skin {
+export function createSkin(
+  beatmapColours: RGB[] | null,
+  custom?: Record<string, [number, number, number, number]>,
+  sources: import('./skinning').LoadedSkin[] = [],
+): Skin {
   const comboColours = beatmapColours && beatmapColours.length > 0 ? beatmapColours : DEFAULT_COMBO_COLOURS;
   const track = custom?.['SliderTrackOverride'];
   const border = custom?.['SliderBorder'];
   return {
+    sources,
     comboColours,
     comboColour: (i: number) => comboColours[((i % comboColours.length) + comboColours.length) % comboColours.length],
     sliderTrackOverride: track ? [track[0], track[1], track[2]] : undefined,

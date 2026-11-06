@@ -20,9 +20,14 @@ const MIME: Record<string, string> = {
   webp: 'image/webp',
   osu: 'text/plain',
   osb: 'text/plain',
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
 };
 
-const SKIP_EXTENSIONS = new Set(['mp4', 'avi', 'flv', 'mov', 'wmv', 'm4v', 'mpg', 'mkv', 'webm']);
+/** Video formats browsers can't play are skipped to save space; mp4/webm/m4v are kept for video backgrounds. */
+const SKIP_EXTENSIONS = new Set(['avi', 'flv', 'wmv', 'mpg', 'mkv']);
 
 export function mimeFor(name: string): string {
   const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase();

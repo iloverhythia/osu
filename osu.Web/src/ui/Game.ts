@@ -11,6 +11,7 @@ import { getRuleset } from '../game/rulesets';
 import type { Ruleset } from '../game/rulesets/Ruleset';
 import type { BeatmapEntry, BeatmapSetRecord } from '../game/storage/Database';
 import { importFiles } from '../game/storage/Importer';
+import { importSkin } from '../game/skinning';
 import { h } from './dom';
 import type { Screen } from './Screen';
 import { Triangles } from './Triangles';
@@ -57,7 +58,7 @@ export class Game {
     this.overlayLayer = h('div', { class: 'layer', style: { pointerEvents: 'none' } });
     this.toastLayer = h('div', { class: 'toasts' });
     this.fpsEl = h('div', { class: 'fps' });
-    this.fileInput = h('input', { type: 'file', accept: '.osz,.osu,.zip', multiple: true, style: { display: 'none' } });
+    this.fileInput = h('input', { type: 'file', accept: '.osz,.osu,.osk,.zip', multiple: true, style: { display: 'none' } });
     this.folderInput = h('input', { type: 'file', multiple: true, style: { display: 'none' } });
     this.folderInput.setAttribute('webkitdirectory', '');
 
@@ -357,6 +358,16 @@ export class Game {
   };
 
   async importFiles(files: File[]): Promise<void> {
+    const skins = files.filter(f => f.name.toLowerCase().endsWith('.osk'));
+    files = files.filter(f => !f.name.toLowerCase().endsWith('.osk'));
+    for (const skin of skins) {
+      try {
+        const name = await importSkin([skin]);
+        this.toast(`Imported skin "${name}"`, 'success');
+      } catch (e) {
+        this.toast(`${skin.name}: ${e instanceof Error ? e.message : String(e)}`, 'error', 6000);
+      }
+    }
     if (files.length === 0) return;
     this.toast(`Importing ${files.length > 1 ? `${files.length} files` : files[0].name}…`);
     try {

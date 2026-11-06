@@ -16,6 +16,8 @@ import type { JudgementResult } from '../../game/scoring/Judgement';
 import type { ScoreProcessor } from '../../game/scoring/ScoreProcessor';
 import type { ScoreRank } from '../../game/scoring/ScoreRank';
 import { createSkin } from '../../game/Skin';
+import { loadActiveSkin, loadBeatmapSkin, type LoadedSkin } from '../../game/skinning';
+import { loadStoryboard, type StoryboardPlayer } from '../../game/storyboard';
 import type { DrawableRuleset, GameplayContext, LoopHandle, PlayableBeatmap, Ruleset } from '../../game/rulesets/Ruleset';
 import { h, keyLabel } from '../dom';
 import type { Game } from '../Game';
@@ -39,6 +41,8 @@ export class PlayerScreen extends Screen {
   private track!: Track;
   private clock!: GameplayClock;
   private background: HTMLImageElement | null = null;
+  private storyboard: StoryboardPlayer | null = null;
+  private skins: LoadedSkin[] = [];
   private sampleResolver: (name: string) => AudioBuffer | null | undefined = () => undefined;
 
   private raf = 0;
@@ -122,12 +126,18 @@ export class PlayerScreen extends Screen {
     this.track = track;
     this.track.preservePitch = this.mods.preservePitch;
 
-    const [bg, resolver] = await Promise.all([
+    const [bg, resolver, storyboard, userSkin, beatmapSkin] = await Promise.all([
       this.working.loadBackgroundImage(),
       this.working.preloadSamples(this.audio, this.collectSampleLookups()),
+      settings.get('gameplay.storyboard', true) ? loadStoryboard(this.working, this.beatmap, this.audio).catch(() => null) : Promise.resolve(null),
+      loadActiveSkin(this.audio).catch(() => null),
+      settings.get('skin.beatmapSkins', true) ? loadBeatmapSkin(this.working.set, this.audio).catch(() => null) : Promise.resolve(null),
       track.ready,
     ]);
     this.background = bg;
+    this.storyboard = storyboard;
+    // Beatmap skin elements take priority over the user's skin (LegacyBeatmapSkin above LegacySkin).
+    this.skins = [beatmapSkin, userSkin].filter((x): x is LoadedSkin => x != null);
     this.sampleResolver = resolver;
     if (this.disposed) return;
 
@@ -223,7 +233,7 @@ export class PlayerScreen extends Screen {
 
   private createContext(): GameplayContext {
     const self = this;
-    const skin = createSkin(this.beatmap.comboColours.length > 0 ? this.beatmap.comboColours : null, this.beatmap.customColours);
+    const skin = createSkin(this.beatmap.comboColours.length > 0 ? this.beatmap.comboColours : null, this.beatmap.customColours, this.skins);
     return {
       mods: this.mods,
       skin,
@@ -253,7 +263,12 @@ export class PlayerScreen extends Screen {
         if (b) return b;
         continue;
       }
-      const d = this.audio.getDefaultSample(name.startsWith('Gameplay/') ? name.slice('Gameplay/'.length) : name);
+      const plain = name.startsWith('Gameplay/') ? name.slice('Gameplay/'.length) : name;
+      for (const skin of this.skins) {
+        const sk = skin.getSample(plain);
+        if (sk) return sk;
+      }
+      const d = this.audio.getDefaultSample(plain);
       if (d) return d;
     }
     return null;
@@ -576,6 +591,7 @@ export class PlayerScreen extends Screen {
     document.removeEventListener('visibilitychange', this.onBlur);
     for (const l of this.loops) l.stop();
     this.drawable?.dispose?.();
+    this.storyboard?.dispose();
     this.track?.dispose();
     if (this.gameplayStarted && !this.resultsShown) void this.game.startPreview();
   }
@@ -629,8 +645,9 @@ export class PlayerScreen extends Screen {
     g.fillRect(0, 0, w, hgt);
 
     const inBreak = this.playable.breaks.some(b => time >= b.startTime && time <= b.endTime && b.endTime - b.startTime >= 650);
+    const sbState = { passing: this.healthProcessor.health >= 0.5 || this.healthProcessor.noFail, running: !this.paused && !this.failed, rate: this.mods.rate };
     // Background
-    if (this.background) {
+    if (this.background && !this.storyboard?.replacesBackground) {
       const img = this.background;
       const s = Math.max(w / img.width, hgt / img.height);
       const iw = img.width * s;
@@ -643,11 +660,32 @@ export class PlayerScreen extends Screen {
       g.fillRect(0, 0, w, hgt);
     }
 
-    if (this.mods.has('CN')) return;
+    if (this.storyboard) {
+      g.save();
+      this.storyboard.drawUnder(g, w, hgt, time, sbState);
+      g.restore();
+      // Apply the background dim on top of the storyboard as well.
+      let dim = settings.get('gameplay.backgroundDim', 0.75);
+      if (inBreak || time < this.firstObjectTime - 1500) dim *= 0.7;
+      if (this.mods.has('CN')) dim = 0;
+      g.fillStyle = `rgba(0,0,0,${dim})`;
+      g.fillRect(0, 0, w, hgt);
+    }
+
+    if (this.mods.has('CN')) {
+      if (this.storyboard) this.storyboard.drawOver(g, w, hgt, time, sbState);
+      return;
+    }
 
     g.save();
     this.drawable.render(g, w, hgt, time);
     g.restore();
+
+    if (this.storyboard) {
+      g.save();
+      this.storyboard.drawOver(g, w, hgt, time, sbState);
+      g.restore();
+    }
 
     if (settings.get('gameplay.showHud', true)) this.drawHud(g, w, hgt, time, inBreak);
     if (inBreak) this.drawBreak(g, w, hgt, time);
