@@ -5,7 +5,9 @@
 //  - osu.Game.Rulesets.Taiko/UI/TaikoPlayfield.cs, DrawableTaikoRuleset.cs, DrumSamplePlayer.cs, DrumSampleTriggerSource.cs,
 //    DrumTouchInputArea.cs, HitExplosion.cs, KiaiHitExplosion.cs, DrawableTaikoJudgement.cs
 //  - Mods: TaikoModHidden, TaikoModFlashlight, TaikoModRelax, ModCinema; Replays: TaikoAutoGenerator / FramedReplayInputHandler.
-// Visuals are drawn procedurally after the default ("triangles") taiko skin pieces (osu.Game.Rulesets.Taiko/Skinning/Default/*).
+// Visuals are drawn procedurally after the default ("triangles") taiko skin pieces (osu.Game.Rulesets.Taiko/Skinning/Default/*),
+// or with legacy skin elements by TaikoLegacySkinRenderer (legacySkin.ts) when a user / beatmap skin provides them.
+import { TaikoLegacySkinRenderer } from './legacySkin';
 
 import { HIT_CLAP, HIT_FINISH, HIT_NORMAL, HIT_WHISTLE, HitSampleInfo } from '../../audio/HitSampleInfo';
 import { HitResult, isHit } from '../../scoring/HitResult';
@@ -302,6 +304,9 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
 
   readonly drawsCursor = false;
 
+  /** Legacy skin renderer (when a user / beatmap skin is in use). */
+  private readonly legacy: TaikoLegacySkinRenderer | null;
+
   constructor(
     private readonly playable: TaikoPlayableBeatmap,
     private readonly ctx: GameplayContext,
@@ -311,6 +316,7 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
     const lastObjectTime = this.objects.length > 0 ? playable.lastObjectTime : Number.MAX_VALUE;
     this.algo = new OverlappingScrollAlgorithm(createMultiplierControlPoints(playable.controlPoints, playable.difficulty.sliderMultiplier, lastObjectTime));
     this.kiaiTimes = playable.controlPoints.effectPoints.some(e => e.kiaiMode);
+    this.legacy = ctx.skin.sources && ctx.skin.sources.length > 0 ? new TaikoLegacySkinRenderer(ctx.skin.sources, playable.controlPoints) : null;
 
     let lookahead = 0;
     for (const o of this.objects) {
@@ -859,6 +865,7 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
     if (down) {
       // DefaultInputDrum.TaikoHalfDrum.OnPressed
       const d = this.drumPress[action];
+      this.legacy?.onDrumPressed(action, time);
       d.peak = Math.min(this.drumOverlayAlpha(action, time) + 0.5, 1);
       d.time = time;
       seg.pressTime = this.realNow;
@@ -938,29 +945,42 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
   private drawPlayfield(ctx: CanvasRenderingContext2D, now: number): void {
     const W = this.layout.width;
     const beat = this.beatState(now);
+    const legacy = this.legacy;
 
     // PlayfieldBackgroundRight
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(0, 0, W, PF_H);
-    ctx.strokeStyle = '#111';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(1, 1, W - 2, PF_H - 2);
+    if (legacy?.has.barRight) legacy.drawBackgroundRight(ctx, W, PF_H, now, this.isKiai(now));
+    else {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(0, 0, W, PF_H);
+      ctx.strokeStyle = '#111';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(1, 1, W - 2, PF_H - 2);
+    }
 
-    // PlayfieldBackgroundLeft
-    ctx.fillStyle = '#111';
-    ctx.fillRect(0, 0, INPUT_DRUM_WIDTH, PF_H);
-    const shadow = ctx.createLinearGradient(INPUT_DRUM_WIDTH, 0, INPUT_DRUM_WIDTH + 10, 0);
-    shadow.addColorStop(0, 'rgba(0,0,0,0.6)');
-    shadow.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = shadow;
-    ctx.fillRect(INPUT_DRUM_WIDTH, 0, 10, PF_H);
+    // PlayfieldBackgroundLeft (displayed inside LegacyInputDrum for legacy skins providing "taiko-bar-right")
+    if (!legacy?.has.barRight) {
+      ctx.fillStyle = '#111';
+      ctx.fillRect(0, 0, INPUT_DRUM_WIDTH, PF_H);
+      const shadow = ctx.createLinearGradient(INPUT_DRUM_WIDTH, 0, INPUT_DRUM_WIDTH + 10, 0);
+      shadow.addColorStop(0, 'rgba(0,0,0,0.6)');
+      shadow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = shadow;
+      ctx.fillRect(INPUT_DRUM_WIDTH, 0, 10, PF_H);
+    }
 
-    this.drawInputDrum(ctx, now);
+    if (legacy?.has.inputDrum) {
+      legacy.drawInputDrum(ctx, INPUT_DRUM_WIDTH, PF_H, now);
+      this.drawDrumCombo(ctx);
+    } else this.drawInputDrum(ctx, now);
 
     // Elements behind hit objects: kiai glow, hit explosions, hit target
-    this.drawKiaiGlow(ctx, now);
-    this.drawExplosions(ctx, now);
-    this.drawHitTarget(ctx);
+    if (legacy?.has.kiaiGlow) legacy.drawKiaiGlow(ctx, HIT_X, CENTRE_Y, this.kiaiGlowAlpha, this.kiaiGlowBumpTime, now);
+    else this.drawKiaiGlow(ctx, now);
+    if (legacy?.has.explosions) {
+      for (const ex of this.explosions) legacy.drawExplosion(ctx, HIT_X, CENTRE_Y, ex.result, ex.time, ex.secondHitTime, now);
+    } else this.drawExplosions(ctx, now);
+    if (legacy?.has.hitTarget) legacy.drawHitTarget(ctx, HIT_X, CENTRE_Y);
+    else this.drawHitTarget(ctx);
 
     // Bar lines
     this.drawBarLines(ctx, now);
@@ -984,9 +1004,11 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
     }
     ctx.restore();
 
-    // Overlay content: kiai explosions, judgements
-    this.drawKiaiExplosions(ctx, now);
-    this.drawJudgements(ctx, now);
+    // Overlay content: kiai explosions, judgements (hidden when a legacy skin provides explosion sprites)
+    if (!legacy?.has.explosions) {
+      this.drawKiaiExplosions(ctx, now);
+      this.drawJudgements(ctx, now);
+    }
 
     // Top level hit objects (proxied content), earliest on top.
     for (const e of proxied) this.drawEntry(ctx, e, now, beat);
@@ -1044,7 +1066,8 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
     if (x - D / 2 > this.layout.width || x + D < -200) return;
 
     if (!e.judged) flash = beat.flash;
-    this.drawCirclePiece(ctx, x, y, D * scale, h.type === HitType.Rim ? COLOUR_RIM : COLOUR_CENTRE, h.type === HitType.Rim ? 'rim' : 'centre', alpha, flash, beat.glow);
+    if (this.legacy?.has.hitCircle) this.legacy.drawHit(ctx, x, y, D * scale, h.type === HitType.Rim, h.isStrong, alpha, this.ctx.combo, h.startTime, now);
+    else this.drawCirclePiece(ctx, x, y, D * scale, h.type === HitType.Rim ? COLOUR_RIM : COLOUR_CENTRE, h.type === HitType.Rim ? 'rim' : 'centre', alpha, flash, beat.glow);
   }
 
   /** CirclePiece (+ CentreHitCirclePiece / RimHitCirclePiece / SwellCirclePiece symbols). */
@@ -1159,7 +1182,15 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
 
     const colour = lerpRGB(YELLOW_DARK, YELLOW_DARKER, this.drumRollColourAt(e, now));
 
-    // ElongatedCirclePiece: width = length + height, rounded ends.
+    if (this.legacy?.has.drumRoll) this.legacy.drawDrumRoll(ctx, x0, x1, CENTRE_Y, H, colour, roll.isStrong, alpha, this.ctx.combo, roll.startTime, now);
+    else this.drawElongatedPiece(ctx, x0, x1, H, colour, alpha, e.judged, beat);
+
+    // Ticks (TickPiece): positioned relative to the drum roll using its scroll multiplier.
+    this.drawDrumRollTicks(ctx, e, roll, x0, alpha, now);
+  }
+
+  /** ElongatedCirclePiece: width = length + height, rounded ends. */
+  private drawElongatedPiece(ctx: CanvasRenderingContext2D, x0: number, x1: number, H: number, colour: RGB, alpha: number, judged: boolean, beat: BeatState): void {
     ctx.globalAlpha = alpha;
     ctx.lineCap = 'round';
     // Glow (radius 8)
@@ -1180,15 +1211,17 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
     ctx.strokeStyle = css(colour);
     ctx.lineWidth = H - SYMBOL_BORDER * 2;
     ctx.stroke();
-    if (beat.flash > 0 && !e.judged) {
+    if (beat.flash > 0 && !judged) {
       ctx.globalCompositeOperation = 'lighter';
       ctx.strokeStyle = `rgba(255,255,255,${beat.flash})`;
       ctx.stroke();
       ctx.globalCompositeOperation = 'source-over';
     }
     ctx.lineCap = 'butt';
+    ctx.globalAlpha = 1;
+  }
 
-    // Ticks (TickPiece): positioned relative to the drum roll using its scroll multiplier.
+  private drawDrumRollTicks(ctx: CanvasRenderingContext2D, e: Entry, roll: DrumRoll, x0: number, alpha: number, now: number): void {
     const pxPerMs = this.algo.controlPointAt(roll.startTime).multiplier * (this.scrollLength / this.timeRange);
     for (const n of e.nested) {
       const tick = n.obj;
@@ -1204,6 +1237,10 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
         ta *= 1 - outQuint(t);
       }
       if (ta <= 0.001) continue;
+      if (this.legacy?.has.drumRollTick) {
+        this.legacy.drawDrumRollTick(ctx, tx, CENTRE_Y, ts, ta);
+        continue;
+      }
       ctx.globalAlpha = ta;
       const tr = (tickSize * ts) / 2;
       ctx.beginPath();
@@ -1282,7 +1319,8 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
       const scale = 1 - 0.2 * outQuad(clamp01(t / (gravityTime * 2)));
       const y = CENTRE_Y + (t < gravityTime ? -200 * outQuad(t / gravityTime) : -200 + 400 * inQuad(clamp01((t - gravityTime) / (gravityTime * 2))));
       const alpha = 1 - clamp01(t / 800);
-      this.drawCirclePiece(ctx, x, y, D * scale, f.rim ? COLOUR_RIM : COLOUR_CENTRE, f.rim ? 'rim' : 'centre', alpha, 0.9 * (1 - clamp01(t / 300)), beat.glow);
+      if (this.legacy?.has.hitCircle) this.legacy.drawHit(ctx, x, y, D * scale, f.rim, f.strong, alpha, this.ctx.combo, f.time, now);
+      else this.drawCirclePiece(ctx, x, y, D * scale, f.rim ? COLOUR_RIM : COLOUR_CENTRE, f.rim ? 'rim' : 'centre', alpha, 0.9 * (1 - clamp01(t / 300)), beat.glow);
     }
   }
 
@@ -1309,6 +1347,10 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
       let alpha = b.major ? 1 : 0.75;
       if (now > b.startTime) alpha *= 1 - clamp01((now - b.startTime) / 150);
       if (alpha <= 0) continue;
+      if (this.legacy?.has.barLine) {
+        this.legacy.drawBarLine(ctx, x, CENTRE_Y, PF_H, alpha);
+        continue;
+      }
       ctx.globalAlpha = alpha;
       ctx.fillRect(x - 1, 0, 2, PF_H);
       if (b.major) {
@@ -1516,7 +1558,13 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
     };
     half(true, 'LeftRim', 'LeftCentre');
     half(false, 'RightRim', 'RightCentre');
+    this.drawDrumCombo(ctx);
+  }
 
+  /** Combo display on the drum. */
+  private drawDrumCombo(ctx: CanvasRenderingContext2D): void {
+    const cx = INPUT_DRUM_WIDTH / 2;
+    const cy = CENTRE_Y;
     if (this.drumCombo && this.ctx.combo > 0) {
       ctx.save();
       ctx.font = 'bold 34px sans-serif';

@@ -26,7 +26,7 @@ export class StoryboardTexture {
    * Lazily built per-channel copies (black silhouette, red-only, green-only, blue-only, each with the texture's alpha) used to draw
    * colour fades exactly without creating a tinted copy per frame: tint(c) = silhouette erase + Σ channel_i · c_i (additively).
    */
-  channels: (OffscreenCanvas | HTMLCanvasElement)[] | null = null;
+  channels: DrawSource[] | null = null;
   /** The latest time any element using this texture is displayed until (used for eviction). */
   lastUseEnd = -Infinity;
 
@@ -39,6 +39,14 @@ export class StoryboardTexture {
 
 type Canvas2D = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 
+/** Turns a finished offscreen canvas into an ImageBitmap (much cheaper to draw repeatedly than an OffscreenCanvas source). */
+function finish(c: OffscreenCanvas | HTMLCanvasElement): ImageBitmap | HTMLCanvasElement {
+  if (typeof OffscreenCanvas !== 'undefined' && c instanceof OffscreenCanvas) return c.transferToImageBitmap();
+  return c as HTMLCanvasElement;
+}
+
+type DrawSource = ImageBitmap | HTMLCanvasElement;
+
 function createCanvas(w: number, h: number): OffscreenCanvas | HTMLCanvasElement {
   if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h);
   const c = document.createElement('canvas');
@@ -48,8 +56,12 @@ function createCanvas(w: number, h: number): OffscreenCanvas | HTMLCanvasElement
 }
 
 interface TintEntry {
-  canvas: OffscreenCanvas | HTMLCanvasElement;
+  canvas: DrawSource;
   pixels: number;
+}
+
+function closeSource(s: DrawSource): void {
+  if (typeof ImageBitmap !== 'undefined' && s instanceof ImageBitmap) s.close();
 }
 
 const MAX_CONCURRENT_DECODES = 6;
@@ -174,12 +186,14 @@ export class StoryboardTextureStore {
   private release(tex: StoryboardTexture): void {
     tex.bitmap?.close();
     tex.bitmap = null;
+    tex.channels?.forEach(closeSource);
     tex.channels = null;
     tex.state = TextureState.None;
     for (const [key, entry] of this.tintCache) {
       if (Math.floor(key / 16777216) === tex.id) {
         this.tintCache.delete(key);
         this.tintPixels -= entry.pixels;
+        closeSource(entry.canvas);
       }
     }
   }
@@ -212,19 +226,21 @@ export class StoryboardTextureStore {
     cx.globalCompositeOperation = 'destination-in';
     cx.drawImage(bitmap, 0, 0);
 
-    this.tintCache.set(key, { canvas, pixels });
+    const source = finish(canvas);
+    this.tintCache.set(key, { canvas: source, pixels });
     this.tintPixels += pixels;
     for (const [k, entry] of this.tintCache) {
       if (this.tintPixels <= TINT_CACHE_PIXEL_BUDGET) break;
       if (k === key) continue;
       this.tintCache.delete(k);
       this.tintPixels -= entry.pixels;
+      closeSource(entry.canvas);
     }
-    return canvas;
+    return source;
   }
 
   /** The per-channel decomposition of a texture (see `StoryboardTexture.channels`), or null if it can't be built. */
-  getChannels(tex: StoryboardTexture): (OffscreenCanvas | HTMLCanvasElement)[] | null {
+  getChannels(tex: StoryboardTexture): DrawSource[] | null {
     if (tex.channels) return tex.channels;
     const bitmap = tex.bitmap;
     const w = tex.width;
@@ -236,7 +252,7 @@ export class StoryboardTextureStore {
       if (!sx) return null;
       sx.drawImage(bitmap, 0, 0);
       const data = sx.getImageData(0, 0, w, h).data;
-      const result: (OffscreenCanvas | HTMLCanvasElement)[] = [];
+      const result: DrawSource[] = [];
       for (let channel = -1; channel < 3; channel++) {
         const img = new ImageData(w, h);
         const out = img.data;
@@ -246,7 +262,7 @@ export class StoryboardTextureStore {
         }
         const c = createCanvas(w, h);
         (c.getContext('2d') as Canvas2D).putImageData(img, 0, 0);
-        result.push(c);
+        result.push(finish(c));
       }
       tex.channels = result;
       return result;
@@ -272,9 +288,11 @@ export class StoryboardTextureStore {
     for (const tex of this.textures) {
       tex.bitmap?.close();
       tex.bitmap = null;
+      tex.channels?.forEach(closeSource);
       tex.channels = null;
       tex.state = TextureState.None;
     }
+    for (const entry of this.tintCache.values()) closeSource(entry.canvas);
     this.queue.length = 0;
     for (const list of this.waiters.values()) for (const r of list) r();
     this.waiters.clear();

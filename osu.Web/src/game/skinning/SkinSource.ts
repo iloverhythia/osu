@@ -38,7 +38,7 @@ export class SkinAnimation {
   /** The frame displayed `elapsed` ms after the animation's start time. */
   frameAt(elapsed: number): SkinTexture {
     const n = this.frames.length;
-    if (n === 1 || !(this.frameLength > 0)) return this.frames[0];
+    if (n === 1 || !(this.frameLength > 0) || !Number.isFinite(elapsed)) return this.frames[0];
     let position = elapsed;
     if (this.loop) position = ((position % this.duration) + this.duration) % this.duration;
     const index = Math.floor(position / this.frameLength);
@@ -359,3 +359,12 @@ export function resolveComboColours(skin: Skin): RGB[] {
 }
 
 export const toRGB = (c: Colour4): RGB => [c[0], c[1], c[2]];
+
+const comboColourCache = new WeakMap<Skin, RGB[]>();
+
+/** The combo colour for an index, using {@link resolveComboColours} (cached per Skin). */
+export function skinComboColour(skin: Skin, index: number): RGB {
+  let colours = comboColourCache.get(skin);
+  if (!colours) comboColourCache.set(skin, (colours = resolveComboColours(skin)));
+  return colours[((index % colours.length) + colours.length) % colours.length];
+}

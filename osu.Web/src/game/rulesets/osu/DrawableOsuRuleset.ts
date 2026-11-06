@@ -681,6 +681,7 @@ export class DrawableOsuRuleset implements DrawableRuleset {
     g.scale(scale, scale);
 
     const L = this.legacy;
+    L?.beginFrame(time);
     if (this.showFollowPoints) {
       if (L?.has.followPoint) L.drawFollowPoints(g, time, this.firstActiveIndex);
       else this.drawFollowPoints(g, time);

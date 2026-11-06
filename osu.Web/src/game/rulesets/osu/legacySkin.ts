@@ -414,6 +414,19 @@ export class OsuLegacySkinRenderer {
   // ================================================================================================ sliders
 
   private readonly bodyCache = new Map<Slider, { key: string; canvas: HTMLCanvasElement | OffscreenCanvas; x: number; y: number; w: number; h: number }>();
+  private readonly canvasPool: (HTMLCanvasElement | OffscreenCanvas)[] = [];
+
+  /** Per-frame housekeeping: recycles the cached bodies of sliders which are no longer visible. */
+  beginFrame(time: number): void {
+    for (const [slider, cached] of this.bodyCache) {
+      if (time > slider.endTime + 1000 || time < slider.startTime - slider.timePreempt - 1000) {
+        this.bodyCache.delete(slider);
+        this.followStates.delete(slider);
+        this.ballRotation.delete(slider);
+        if (this.canvasPool.length < 8) this.canvasPool.push(cached.canvas);
+      }
+    }
+  }
   private readonly followStates = new Map<Slider, FollowCircleState>();
 
   /**
@@ -532,7 +545,7 @@ export class OsuLegacySkinRenderer {
     const key = `${points.length}|${first.x},${first.y}|${last.x},${last.y}|${pw}x${ph}|${colour.join()}`;
     let cached = this.bodyCache.get(slider);
     if (!cached || cached.key !== key) {
-      const canvas = cached?.canvas ?? createCanvas(pw, ph);
+      const canvas = cached?.canvas ?? this.canvasPool.pop() ?? createCanvas(pw, ph);
       if (canvas.width !== pw || canvas.height !== ph) {
         canvas.width = pw;
         canvas.height = ph;
@@ -1272,6 +1285,7 @@ export class OsuLegacySkinRenderer {
 
   dispose(): void {
     this.bodyCache.clear();
+    this.canvasPool.length = 0;
   }
 }
 

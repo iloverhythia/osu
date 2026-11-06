@@ -23,6 +23,8 @@ import {
   type CatchHitObject,
 } from './objects';
 import { drawBanana, drawCatcherPlate, drawDroplet, drawFruit, drawHitExplosion, HYPER_DASH_COLOUR, type PieceParams } from './pieces';
+import { CatchLegacySkinRenderer, type CatcherAnimationState } from './legacySkin';
+import { skinComboColour } from '../../skinning/SkinSource';
 
 /** Height of the falling area in playfield units: stable fruits fall from y = -100 down to the catcher at y = 340. */
 const FALL_HEIGHT = 440;
@@ -78,7 +80,7 @@ class PalpableEntry {
     } else {
       this.kind = obj instanceof TinyDroplet ? PieceKind.TinyDroplet : obj instanceof Droplet ? PieceKind.Droplet : PieceKind.Fruit;
       // PalpableCatchHitObject.GetComboColour: IndexInBeatmap + 1
-      this.colour = ctx.skin.comboColour(obj.indexInBeatmap + 1);
+      this.colour = skinComboColour(ctx.skin, obj.indexInBeatmap + 1);
       this.startScale = 1;
       this.endAngle = 0;
       if (this.kind === PieceKind.Fruit) {
@@ -132,6 +134,9 @@ interface Trail {
   time: number;
   x: number;
   kind: TrailKind;
+  /** Catcher animation state and direction when the trail was created (CatcherTrailEntry), for legacy catcher sprites. */
+  state?: CatcherAnimationState;
+  direction?: number;
 }
 
 interface Explosion {
@@ -214,6 +219,13 @@ export class DrawableCatchRuleset implements DrawableRuleset {
   private flashlightDuration = 0;
   private layout: Layout | null = null;
   private readonly piece: PieceParams = { x: 0, y: 0, radius: 0, rotation: 0, colour: [255, 255, 255], hyper: false, alpha: 1, seed: 0, layerRotation: 0 };
+  /** Legacy skin renderer (when a user / beatmap skin is in use). */
+  private readonly legacy: CatchLegacySkinRenderer | null;
+  /** Catcher.CurrentState (CatcherAnimationState), only used for legacy catcher sprites. */
+  private catcherAnimationState: CatcherAnimationState = 'idle';
+  private catcherAnimationStateTime = 0;
+  private readonly hyperDashColour: RGB;
+  private readonly hyperDashAfterImageColour: RGB;
 
   constructor(
     private readonly playable: CatchPlayableBeatmap,
@@ -232,6 +244,9 @@ export class DrawableCatchRuleset implements DrawableRuleset {
     this.positionalHitsoundsLevel = ctx.settings.get('fruits.positionalHitsoundsLevel', 0.2);
     this.touchZoneWidth = Math.min(0.5, Math.max(0.05, ctx.settings.get('fruits.touchZoneWidth', TOUCH_ZONE_WIDTH)));
     this.autoplay = ctx.autoplay ? new CatchAutoGenerator(playable.hitObjects, difficulty.circleSize) : null;
+    this.legacy = ctx.skin.sources && ctx.skin.sources.length > 0 ? new CatchLegacySkinRenderer(ctx.skin.sources) : null;
+    this.hyperDashColour = this.legacy?.hyperDashColour ?? HYPER_DASH_COLOUR;
+    this.hyperDashAfterImageColour = this.legacy?.hyperDashAfterImageColour ?? HYPER_DASH_COLOUR;
 
     // Judgement order: nested objects before their parent (DrawableHitObject.UpdateResult in UpdateAfterChildren), then by time.
     const entryFor = new Map<PalpableCatchHitObject, PalpableEntry>();
@@ -490,6 +505,15 @@ export class DrawableCatchRuleset implements DrawableRuleset {
     }
 
     this.catcher.onPalpableResult(hitObject, hit, time);
+
+    // Catcher.OnNewResult: the catcher's animation state (droplets don't affect it).
+    if (!(hitObject instanceof TinyDroplet)) {
+      const state: CatcherAnimationState | null = hit ? (hitObject.kiai ? 'kiai' : 'idle') : hitObject instanceof Banana ? null : 'fail';
+      if (state && state !== this.catcherAnimationState) {
+        this.catcherAnimationState = state;
+        this.catcherAnimationStateTime = time;
+      }
+    }
   }
 
   /** Catcher.computePositionInStack */
@@ -589,13 +613,15 @@ export class DrawableCatchRuleset implements DrawableRuleset {
       this.hyperColourStart = time;
     }
 
-    if (!this.lastHyperDashState && hyper) this.trails.push({ time, x: this.catcher.x, kind: TrailKind.HyperDashAfterImage });
+    if (!this.lastHyperDashState && hyper)
+      this.trails.push({ time, x: this.catcher.x, kind: TrailKind.HyperDashAfterImage, state: this.catcherAnimationState, direction: this.catcher.visualDirection });
 
     if (this.catcher.dashing || hyper) {
       const TRAIL_GENERATION_INTERVAL = 16;
       let lastDashTrailTime = -Infinity;
       for (const t of this.trails) if (t.kind !== TrailKind.HyperDashAfterImage && t.time > lastDashTrailTime) lastDashTrailTime = t.time;
-      if (time - lastDashTrailTime >= TRAIL_GENERATION_INTERVAL) this.trails.push({ time, x: this.catcher.x, kind: hyper ? TrailKind.HyperDashing : TrailKind.Dashing });
+      if (time - lastDashTrailTime >= TRAIL_GENERATION_INTERVAL)
+        this.trails.push({ time, x: this.catcher.x, kind: hyper ? TrailKind.HyperDashing : TrailKind.Dashing, state: this.catcherAnimationState, direction: this.catcher.visualDirection });
     }
 
     this.lastHyperDashState = hyper;
@@ -716,8 +742,13 @@ export class DrawableCatchRuleset implements DrawableRuleset {
     // Catcher area: catcher body, then trails, then hit explosions
     const catcherWidthPx = CATCHER_BASE_SIZE * catcherScale * k;
     const hyperT = Math.min(1, Math.max(0, this.hyperColourValue(time)));
-    const bodyColour: RGB = [255, 255 * (1 - hyperT), 255 * (1 - hyperT)];
-    drawCatcherPlate(g, catcherX, plateY, catcherWidthPx, catcherScale * k, bodyColour, 1, width, true);
+    const hc = this.hyperDashColour;
+    // Catcher.FadeColour(hyperDashColour) while hyper dashing.
+    const bodyColour: RGB = [255 + (hc[0] - 255) * hyperT, 255 + (hc[1] - 255) * hyperT, 255 + (hc[2] - 255) * hyperT];
+    const legacyCatcher = this.legacy?.has.catcher ? this.legacy : null;
+    if (legacyCatcher)
+      legacyCatcher.drawCatcher(g, catcherX, plateY, k, catcherScale, this.catcher.visualDirection, this.catcherAnimationState, time - this.catcherAnimationStateTime, bodyColour);
+    else drawCatcherPlate(g, catcherX, plateY, catcherWidthPx, catcherScale * k, bodyColour, 1, width, true);
 
     g.globalCompositeOperation = 'lighter';
     for (const t of this.trails) {
@@ -726,10 +757,14 @@ export class DrawableCatchRuleset implements DrawableRuleset {
       if (t.kind === TrailKind.HyperDashAfterImage) {
         const p = Math.min(1, el / 1200);
         const s = 0.95 + (1.2 - 0.95) * inQuad(p);
-        drawCatcherPlate(g, tx, plateY - 10 * inQuad(p) * k, catcherWidthPx * s, catcherScale * k * s, HYPER_DASH_COLOUR, 1 - p, width, false);
+        if (legacyCatcher)
+          legacyCatcher.drawCatcher(g, tx, plateY - 10 * inQuad(p) * k, k, catcherScale * s, t.direction ?? 1, t.state ?? 'idle', 0, this.hyperDashAfterImageColour, 1 - p, true);
+        else drawCatcherPlate(g, tx, plateY - 10 * inQuad(p) * k, catcherWidthPx * s, catcherScale * k * s, this.hyperDashAfterImageColour, 1 - p, width, false);
       } else {
         const alpha = 0.4 * (1 - outQuint(el / 800));
-        drawCatcherPlate(g, tx, plateY, catcherWidthPx, catcherScale * k, t.kind === TrailKind.HyperDashing ? HYPER_DASH_COLOUR : WHITE, alpha, width, false);
+        const colour = t.kind === TrailKind.HyperDashing ? this.hyperDashColour : WHITE;
+        if (legacyCatcher) legacyCatcher.drawCatcher(g, tx, plateY, k, catcherScale, t.direction ?? 1, t.state ?? 'idle', 0, colour, alpha, true);
+        else drawCatcherPlate(g, tx, plateY, catcherWidthPx, catcherScale * k, colour, alpha, width, false);
       }
     }
     g.globalCompositeOperation = 'source-over';
@@ -785,6 +820,14 @@ export class DrawableCatchRuleset implements DrawableRuleset {
   }
 
   private drawEntry(g: CanvasRenderingContext2D, e: PalpableEntry, x: number, y: number, radius: number, rotation: number, alpha: number, age: number, time: number): void {
+    const L = this.legacy;
+    if (L) {
+      const kind = e.kind === PieceKind.Fruit ? 'fruit' : e.kind === PieceKind.Banana ? 'banana' : 'droplet';
+      if (L.has[kind]) {
+        L.drawPiece(g, kind, e.obj.indexInBeatmap, x, y, radius, rotation, e.colour, e.obj.hyperDash, alpha);
+        return;
+      }
+    }
     const p = this.piece;
     p.x = x;
     p.y = y;
