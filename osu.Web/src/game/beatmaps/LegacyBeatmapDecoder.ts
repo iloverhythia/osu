@@ -277,6 +277,11 @@ export class LegacyBeatmapDecoder {
 
   private handleEditor(line: string): void {
     const [key, value] = splitKeyVal(line);
+    if (key === 'BeatDivisor') {
+      // BindableBeatDivisor.MINIMUM_DIVISOR / MAXIMUM_DIVISOR
+      this.beatmap.beatDivisor = clamp(parseInt32(value), 1, 16);
+      return;
+    }
     if (key === 'Bookmarks') {
       this.beatmap.bookmarks = value
         .split(',')

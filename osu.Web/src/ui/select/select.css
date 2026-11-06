@@ -186,6 +186,8 @@
 
 .ss-carousel-container {
   position: absolute;
+  z-index: 1;
+  isolation: isolate;
   left: 0;
   right: 0;
 }
@@ -1600,6 +1602,10 @@
   line-height: 1.1;
 }
 
+.pb-variant {
+  white-space: pre;
+}
+
 .pb-variant,
 .pb-diff {
   font-size: 16px;
@@ -2689,4 +2695,28 @@
 .vad-value {
   font-size: 18px;
   font-weight: 600;
+}
+
+/* Portrait phones (not part of lazer): the left wedges are hidden, the footer is compacted. */
+.song-select.portrait .filter-control {
+  left: 24px;
+}
+
+.song-select.portrait .back-button {
+  width: 100px !important;
+}
+
+.song-select.portrait .back-button .back-text {
+  display: none;
+}
+
+.song-select.portrait .footer-grid {
+  padding-left: 124px !important;
+}
+
+.song-select.portrait .footer-logo {
+  transform: scale(0.6);
+  transform-origin: 100% 100%;
+  right: 0;
+  bottom: -30px;
 }

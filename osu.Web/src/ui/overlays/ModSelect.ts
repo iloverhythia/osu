@@ -521,18 +521,20 @@ class ModSelectOverlay {
       this.deselectAllMods();
       return true;
     }
-    if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return false;
+    if (e.ctrlKey || e.metaKey || e.altKey) return false;
+    if (e.repeat) return true;
     // SequentialModHotkeyHandler (the default ModSelectHotkeyStyle)
     for (const col of this.columns) {
       if (!col.keys) continue;
       const index = col.keys.indexOf(e.code);
       if (index < 0) continue;
       const p = col.panels.filter(x => x.visible)[index];
-      if (!p) return false;
+      if (!p) return true;
       this.togglePanel(p);
       return true;
     }
-    return false;
+    // BlockNonPositionalInput: keys don't reach the song select underneath.
+    return true;
   }
 
   // ------------------------------------------------------------------ transitions

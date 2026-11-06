@@ -29,6 +29,10 @@ export interface BeatmapEntry {
   onlineId: number;
   /** MD5 of the .osu file (how osu! identifies beatmaps in replays). */
   md5?: string;
+  /** Number of objects with a duration (sliders/spinners/holds), used by mania convert key filters. */
+  endTimeObjectCount?: number;
+  /** [Editor] BeatDivisor */
+  beatDivisor?: number;
 }
 
 export interface BeatmapSetRecord {
@@ -123,6 +127,11 @@ export const Database = {
   async addScore(score: ScoreRecord): Promise<number> {
     const db = await open();
     return wrap(db.transaction('scores', 'readwrite').objectStore('scores').add(score)) as Promise<number>;
+  },
+
+  async getAllScores(): Promise<ScoreRecord[]> {
+    const db = await open();
+    return wrap(db.transaction('scores').objectStore('scores').getAll());
   },
 
   async getScores(beatmapHash: string): Promise<ScoreRecord[]> {

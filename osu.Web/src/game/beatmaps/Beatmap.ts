@@ -130,6 +130,8 @@ export class Beatmap {
   letterboxInBreaks = false;
   widescreenStoryboard = false;
   bookmarks: number[] = [];
+  /** [Editor] BeatDivisor (BeatmapInfo.BeatDivisor), clamped to 1..16. */
+  beatDivisor = 4;
 
   get firstObjectTime(): number {
     return this.hitObjects.length > 0 ? this.hitObjects[0].startTime : 0;

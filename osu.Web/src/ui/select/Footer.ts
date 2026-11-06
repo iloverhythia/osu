@@ -430,6 +430,9 @@ export class ScreenFooter {
       b.el.style.bottom = '0';
     });
     this.updateColourScheme(hue);
+    // SongSelect: logo.FadeTo(0, 200, OutQuint) while the mod select overlay is visible.
+    tween(this.logo, { opacity: '0' }, 200, Easing.OutQuint);
+    this.logo.style.pointerEvents = 'none';
     this.overlayContent.textContent = '';
     if (content) {
       this.overlayContent.appendChild(content);
@@ -453,6 +456,8 @@ export class ScreenFooter {
       b.el.style.pointerEvents = '';
     }
     this.hiddenForOverlay = [];
+    tween(this.logo, { opacity: '1' }, 200, Easing.OutQuint);
+    this.logo.style.pointerEvents = '';
     // lazer resets to Aquamarine here.
     this.updateColourScheme(OverlayColourScheme.Aquamarine);
     this.activeOverlay = null;

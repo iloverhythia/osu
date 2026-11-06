@@ -60,6 +60,8 @@ export function entryFromBeatmap(filename: string, text: string, beatmap: Beatma
     overallDifficulty: beatmap.difficulty.overallDifficulty,
     drainRate: beatmap.difficulty.drainRate,
     onlineId: beatmap.onlineId,
+    endTimeObjectCount: beatmap.hitObjects.filter(h => h.kind !== 'circle').length,
+    beatDivisor: beatmap.beatDivisor,
   };
 }
 
