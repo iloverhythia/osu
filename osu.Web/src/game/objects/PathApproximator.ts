@@ -1,7 +1,16 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // Port of osu.Framework.Utils.PathApproximator.
 
-import { Vec2, almostEquals, add, scale, sub, lengthSq } from '../../framework/math';
+import { Vec2, almostEquals } from '../../framework/math';
+
+// osuTK Vector2 is single precision: every component operation rounds to float32.
+const f = Math.fround;
+const add = (a: Vec2, b: Vec2): Vec2 => ({ x: f(a.x + b.x), y: f(a.y + b.y) });
+const sub = (a: Vec2, b: Vec2): Vec2 => ({ x: f(a.x - b.x), y: f(a.y - b.y) });
+const scale = (a: Vec2, s: number): Vec2 => ({ x: f(a.x * f(s)), y: f(a.y * f(s)) });
+const lengthSq = (a: Vec2): number => f(f(a.x * a.x) + f(a.y * a.y));
+/** osuTK `Vector2 / float`: divides each component directly (verified against ppy/osuTK Vector2.cs). */
+const div = (a: Vec2, s: number): Vec2 => ({ x: f(a.x / f(s)), y: f(a.y / f(s)) });
 
 const BEZIER_TOLERANCE = Math.fround(0.25);
 const CATMULL_DETAIL = 50;
@@ -64,7 +73,7 @@ function bSplineToBezierInternal(controlPoints: readonly Vec2[], degree: number)
       subBezier[j + 1] = points[i + 1];
       for (let k = 1; k < degree - j; k++) {
         const l = Math.min(k, pointCount - degree - i);
-        points[i + k] = scale(add(scale(points[i + k], l), points[i + k + 1]), 1 / (l + 1));
+        points[i + k] = div(add(scale(points[i + k], l), points[i + k + 1]), l + 1);
       }
     }
     subBezier[degree] = points[i + 1];
@@ -89,7 +98,9 @@ function bezierSubdivide(controlPoints: Vec2[], l: Vec2[], r: Vec2[], subdivisio
   for (let i = 0; i < count; i++) {
     l[i] = midpoints[0];
     r[count - i - 1] = midpoints[count - i - 1];
-    for (let j = 0; j < count - i - 1; j++) midpoints[j] = scale(add(midpoints[j], midpoints[j + 1]), 0.5);
+    for (let j = 0; j < count - i - 1; j++) {
+      midpoints[j] = div(add(midpoints[j], midpoints[j + 1]), 2);
+    }
   }
 }
 
@@ -114,20 +125,26 @@ export function catmullToPiecewiseLinear(controlPoints: readonly Vec2[]): Vec2[]
     const v3 = i < controlPoints.length - 1 ? controlPoints[i + 1] : sub(scale(v2, 2), v1);
     const v4 = i < controlPoints.length - 2 ? controlPoints[i + 2] : sub(scale(v3, 2), v2);
     for (let c = 0; c < CATMULL_DETAIL; c++) {
-      result.push(catmullFindPoint(v1, v2, v3, v4, c / CATMULL_DETAIL));
-      result.push(catmullFindPoint(v1, v2, v3, v4, (c + 1) / CATMULL_DETAIL));
+      result.push(catmullFindPoint(v1, v2, v3, v4, f(c) / CATMULL_DETAIL));
+      result.push(catmullFindPoint(v1, v2, v3, v4, f(c + 1) / CATMULL_DETAIL));
     }
   }
   return result;
 }
 
 function catmullFindPoint(v1: Vec2, v2: Vec2, v3: Vec2, v4: Vec2, t: number): Vec2 {
-  const t2 = t * t;
-  const t3 = t * t2;
-  return {
-    x: 0.5 * (2 * v2.x + (-v1.x + v3.x) * t + (2 * v1.x - 5 * v2.x + 4 * v3.x - v4.x) * t2 + (-v1.x + 3 * v2.x - 3 * v3.x + v4.x) * t3),
-    y: 0.5 * (2 * v2.y + (-v1.y + v3.y) * t + (2 * v1.y - 5 * v2.y + 4 * v3.y - v4.y) * t2 + (-v1.y + 3 * v2.y - 3 * v3.y + v4.y) * t3),
-  };
+  t = f(t);
+  const t2 = f(t * t);
+  const t3 = f(t * t2);
+  const c = (a: number, b: number, cc: number, d: number) =>
+    f(
+      f(0.5) *
+        f(
+          f(f(f(2 * b) + f(f(-a + cc) * t)) + f(f(f(f(f(2 * a) - f(5 * b)) + f(4 * cc)) - d) * t2)) +
+            f(f(f(f(-a + f(3 * b)) - f(3 * cc)) + d) * t3),
+        ),
+    );
+  return { x: c(v1.x, v2.x, v3.x, v4.x), y: c(v1.y, v2.y, v3.y, v4.y) };
 }
 
 export class CircularArcProperties {
@@ -144,21 +161,24 @@ export class CircularArcProperties {
     const c = controlPoints[2];
 
     // Degenerate triangle: fall back to a more numerically stable method.
-    if (almostEquals(0, (b.y - a.y) * (c.x - a.x) - (b.x - a.x) * (c.y - a.y))) return;
+    if (almostEquals(0, f(f(f(b.y - a.y) * f(c.x - a.x)) - f(f(b.x - a.x) * f(c.y - a.y))))) return;
 
-    const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+    const d = f(2 * f(f(f(a.x * f(b.y - c.y)) + f(b.x * f(c.y - a.y))) + f(c.x * f(a.y - b.y))));
     const aSq = lengthSq(a);
     const bSq = lengthSq(b);
     const cSq = lengthSq(c);
 
-    this.centre = {
-      x: (aSq * (b.y - c.y) + bSq * (c.y - a.y) + cSq * (a.y - b.y)) / d,
-      y: (aSq * (c.x - b.x) + bSq * (a.x - c.x) + cSq * (b.x - a.x)) / d,
-    };
+    this.centre = div(
+      {
+        x: f(f(f(aSq * f(b.y - c.y)) + f(bSq * f(c.y - a.y))) + f(cSq * f(a.y - b.y))),
+        y: f(f(f(aSq * f(c.x - b.x)) + f(bSq * f(a.x - c.x))) + f(cSq * f(b.x - a.x))),
+      },
+      d,
+    );
 
     const dA = sub(a, this.centre);
     const dC = sub(c, this.centre);
-    this.radius = Math.hypot(dA.x, dA.y);
+    this.radius = f(Math.sqrt(lengthSq(dA)));
     this.thetaStart = Math.atan2(dA.y, dA.x);
     let thetaEnd = Math.atan2(dC.y, dC.x);
     while (thetaEnd < this.thetaStart) thetaEnd += 2 * Math.PI;
@@ -167,8 +187,10 @@ export class CircularArcProperties {
     this.thetaRange = thetaEnd - this.thetaStart;
 
     // Decide in which direction to draw the circle, depending on which side of AC B lies.
-    const orthoAtoC = { x: c.y - a.y, y: -(c.x - a.x) };
-    if (orthoAtoC.x * (b.x - a.x) + orthoAtoC.y * (b.y - a.y) < 0) {
+    const ac = sub(c, a);
+    const orthoAtoC = { x: ac.y, y: -ac.x };
+    const ab = sub(b, a);
+    if (f(f(orthoAtoC.x * ab.x) + f(orthoAtoC.y * ab.y)) < 0) {
       this.direction = -this.direction;
       this.thetaRange = 2 * Math.PI - this.thetaRange;
     }
@@ -183,13 +205,14 @@ export function circularArcToPiecewiseLinear(controlPoints: readonly Vec2[]): Ve
   const amountPoints =
     2 * pr.radius <= CIRCULAR_ARC_TOLERANCE
       ? 2
-      : Math.max(2, Math.ceil(pr.thetaRange / (2 * Math.acos(1 - CIRCULAR_ARC_TOLERANCE / pr.radius))));
+      : Math.max(2, Math.ceil(pr.thetaRange / (2 * Math.acos(f(1 - f(CIRCULAR_ARC_TOLERANCE / pr.radius))))));
 
   const output: Vec2[] = [];
   for (let i = 0; i < amountPoints; ++i) {
     const fract = i / (amountPoints - 1);
     const theta = pr.thetaStart + pr.direction * fract * pr.thetaRange;
-    output.push({ x: pr.centre.x + Math.cos(theta) * pr.radius, y: pr.centre.y + Math.sin(theta) * pr.radius });
+    const o = { x: f(f(Math.cos(theta)) * pr.radius), y: f(f(Math.sin(theta)) * pr.radius) };
+    output.push(add(pr.centre, o));
   }
   return output;
 }

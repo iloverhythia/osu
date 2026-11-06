@@ -1,7 +1,12 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // Port of osu.Game/Rulesets/Objects/SliderPath.cs (+ PathControlPoint / PathType).
 
-import { Vec2, almostEquals, binarySearch, distance, equals, normalize, sub } from '../../framework/math';
+import { Vec2, almostEquals, binarySearch, equals } from '../../framework/math';
+
+// osuTK Vector2 maths is single precision.
+const f = Math.fround;
+const lengthF = (dx: number, dy: number) => f(Math.sqrt(f(f(dx * dx) + f(dy * dy))));
+const distance = (a: Vec2, b: Vec2) => lengthF(f(a.x - b.x), f(a.y - b.y));
 import {
   CircularArcProperties,
   bSplineToPiecewiseLinear,
@@ -161,7 +166,7 @@ export class SliderPath {
         if (!props.isValid) break;
         // If we have a lot of points, it's probably better to use a bezier curve instead.
         const subPoints =
-          2 * props.radius <= 0.1 ? 2 : Math.max(2, Math.ceil(props.thetaRange / (2 * Math.acos(1 - 0.1 / props.radius))));
+          f(2 * props.radius) <= f(0.1) ? 2 : Math.max(2, Math.ceil(props.thetaRange / (2 * Math.acos(f(1 - f(f(0.1) / props.radius))))));
         if (subPoints >= 1000) break;
         const subPath = circularArcToPiecewiseLinear(subControlPoints);
         if (subPath.length === 0) break;
@@ -235,10 +240,13 @@ export class SliderPath {
         return;
       }
 
-      // The direction of the segment to shorten or lengthen
-      const dir = normalize(sub(path[pathEndIndex], path[pathEndIndex - 1]));
-      const remaining = Math.fround(expectedDistance - this.cumulativeLength[this.cumulativeLength.length - 1]);
-      path[pathEndIndex] = { x: path[pathEndIndex - 1].x + dir.x * remaining, y: path[pathEndIndex - 1].y + dir.y * remaining };
+      // The direction of the segment to shorten or lengthen (Vector2.Normalized: this * (1 / Length), in float)
+      const dx = f(path[pathEndIndex].x - path[pathEndIndex - 1].x);
+      const dy = f(path[pathEndIndex].y - path[pathEndIndex - 1].y);
+      const inv = f(1 / lengthF(dx, dy));
+      const dir = { x: f(dx * inv), y: f(dy * inv) };
+      const remaining = f(expectedDistance - this.cumulativeLength[this.cumulativeLength.length - 1]);
+      path[pathEndIndex] = { x: f(path[pathEndIndex - 1].x + f(dir.x * remaining)), y: f(path[pathEndIndex - 1].y + f(dir.y * remaining)) };
       this.cumulativeLength.push(expectedDistance);
     }
   }
@@ -266,7 +274,7 @@ export class SliderPath {
 
     // Avoid division by and almost-zero number in case two points are extremely close to each other.
     if (almostEquals(d0, d1)) return p0;
-    const w = (d - d0) / (d1 - d0);
-    return { x: p0.x + (p1.x - p0.x) * w, y: p0.y + (p1.y - p0.y) * w };
+    const w = f((d - d0) / (d1 - d0));
+    return { x: f(p0.x + f(f(p1.x - p0.x) * w)), y: f(p0.y + f(f(p1.y - p0.y) * w)) };
   }
 }
