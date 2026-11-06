@@ -143,7 +143,7 @@ export function openSettings(game: Game): void {
     slider('Master volume', 'audio.master', 0, 1, 0.01, pct),
     slider('Music volume', 'audio.music', 0, 1, 0.01, pct),
     slider('Effect volume', 'audio.effects', 0, 1, 0.01, pct),
-    slider('Audio offset', 'audio.offset', -200, 200, 1, v => `${v}ms`, 'Positive values make hit objects appear later.'),
+    slider('Audio offset', 'audio.offset', -500, 500, 1, v => `${v}ms`, 'Positive values make hit objects appear later.'),
     toggle('Compensate for output latency', 'audio.compensateLatency', 'Uses the browser-reported audio output latency.'),
 
     h('h3', null, 'Gameplay'),
@@ -151,6 +151,10 @@ export function openSettings(game: Game): void {
     toggle('Show HUD', 'gameplay.showHud'),
     toggle('Hit error meter', 'gameplay.hitErrorMeter'),
     toggle('Key overlay', 'gameplay.showKeyCounter'),
+    toggle('Lighten during breaks', 'gameplay.lightenDuringBreaks'),
+    toggle('Increase visibility of first object when visual impairment mods are enabled', 'gameplay.increaseFirstObjectVisibility'),
+    toggle('Fade playfield to red when health is low', 'gameplay.fadePlayfieldWhenHealthLow'),
+    toggle('Always play first combo break sound', 'gameplay.alwaysPlayFirstComboBreak'),
     toggle('Combo break sound', 'gameplay.comboBreakSound'),
     toggle('Disable mouse buttons during gameplay', 'gameplay.disableMouseButtons'),
 
@@ -159,7 +163,7 @@ export function openSettings(game: Game): void {
     skinSettingsSection(game),
 
     h('h3', null, RULESET_DISPLAY_NAMES[0]),
-    slider('Cursor size', 'osu.cursorSize', 0.5, 2, 0.05, v => `${v.toFixed(2)}x`),
+    slider('Cursor size', 'osu.cursorSize', 0.1, 2, 0.01, v => `${v.toFixed(2)}x`),
     toggle('Cursor trail', 'osu.cursorTrail'),
     toggle('Follow points', 'osu.followPoints'),
     toggle('Snaking in sliders', 'osu.snakingIn'),

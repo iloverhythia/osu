@@ -4,16 +4,22 @@
 const STORAGE_KEY = 'osu-web.settings';
 
 export const DEFAULT_SETTINGS = {
-  'audio.master': 0.8,
-  'audio.music': 0.8,
-  'audio.effects': 0.8,
+  // FrameworkConfigManager VolumeUniversal / VolumeMusic / VolumeEffect defaults.
+  'audio.master': 1,
+  'audio.music': 1,
+  'audio.effects': 1,
   /** Universal offset in ms (positive = hit objects later). */
   'audio.offset': 0,
   'audio.compensateLatency': true,
-  'gameplay.backgroundDim': 0.75,
+  // OsuConfigManager defaults: DimLevel 0.7, KeyOverlay false, LightenDuringBreaks true, IncreaseFirstObjectVisibility true.
+  'gameplay.backgroundDim': 0.7,
+  'gameplay.lightenDuringBreaks': true,
+  'gameplay.increaseFirstObjectVisibility': true,
+  'gameplay.fadePlayfieldWhenHealthLow': true,
+  'gameplay.alwaysPlayFirstComboBreak': true,
   'gameplay.showHud': true,
   'gameplay.hitErrorMeter': true,
-  'gameplay.showKeyCounter': true,
+  'gameplay.showKeyCounter': false,
   'gameplay.disableMouseButtons': false,
   'gameplay.storyboard': true,
   'skin.beatmapSkins': true,
