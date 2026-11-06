@@ -6,6 +6,7 @@
 //    osu.Game/Screens/Play/HotkeyRetryOverlay.cs, HotkeyExitOverlay.cs, HUD/HoldForMenuButton.cs
 //  - osu.Game/Screens/Play/ResumeOverlay.cs + osu.Game.Rulesets.Osu/UI/OsuResumeOverlay.cs
 
+import { settings } from '../../framework/Settings';
 import { h } from '../dom';
 import { Anim, Easing, OsuColour, css, dampContinuously, type RGBA } from './anim';
 import { MINIMUM_SKIP_TIME } from './clock';
@@ -230,9 +231,20 @@ export class HoldForMenuButton {
   private hovered = false;
   private textAlpha = new Anim(0);
   private pendingAnimationUntil = 0;
+  /** OsuSetting.AlwaysShowHoldForMenuButton */
+  private readonly alwaysShow = settings.get('gameplay.alwaysShowHoldForMenu', false);
+  /** OsuSetting.AlwaysRequireHoldingForPause */
+  private readonly alwaysRequireHold = settings.get('gameplay.alwaysRequireHoldForPause', false);
+  private readonly isDangerousAction: boolean;
+  /** Distance from the button / 100 ("positionalAdjust"), starting at 1. */
+  private positionalAdjust = 1;
+  private alpha = 0;
+  private lastUpdate = 0;
+  private keyHeld = false;
 
   constructor(delay: number, isDangerousAction = false) {
     this.hold = new HoldToConfirm(isDangerousAction ? 500 : delay, true);
+    this.isDangerousAction = isDangerousAction;
     this.text = h('span', { class: 'hfm-text' }, this.hold.holdActivationDelay > 0 ? 'Hold for menu' : 'Press for menu');
     this.progressEl = h('div', { class: 'hfm-progress' });
     this.icon = h('span', { class: 'hfm-icon' }, '✕');
@@ -256,7 +268,33 @@ export class HoldForMenuButton {
     this.circle.addEventListener('pointerup', up);
     this.circle.addEventListener('pointercancel', up);
     this.el.style.opacity = '0';
-    this.el.style.pointerEvents = 'none';
+    this.el.style.pointerEvents = this.alwaysShow ? 'auto' : 'none';
+    window.addEventListener('keyup', this.onKeyUp);
+  }
+
+  /** HoldButton.OnPressed(GlobalAction.Back / PauseGameplay): hold when dangerous or AlwaysRequireHoldingForPause, else confirm. */
+  back(now: number): void {
+    if (now < this.pendingAnimationUntil) return;
+    if (this.isDangerousAction || this.alwaysRequireHold) {
+      this.keyHeld = true;
+      this.hold.begin(now);
+    } else this.hold.confirm();
+  }
+
+  private readonly onKeyUp = (e: KeyboardEvent): void => {
+    if (e.code !== 'Escape' || !this.keyHeld) return;
+    this.keyHeld = false;
+    this.hold.abort(performance.now());
+  };
+
+  /** OnMouseMove: positionalAdjust = distance to the button centre / 100. */
+  mouseMove(clientX: number, clientY: number): void {
+    const r = this.circle.getBoundingClientRect();
+    this.positionalAdjust = Math.hypot(clientX - (r.left + r.width / 2), clientY - (r.top + r.height / 2)) / 100;
+  }
+
+  dispose(): void {
+    window.removeEventListener('keyup', this.onKeyUp);
   }
 
   /** SessionStatics.TouchInputActive changed. */
@@ -277,10 +315,17 @@ export class HoldForMenuButton {
     const p = this.hold.progress(now);
     const textA = this.textAlpha.valueAt(now);
     this.text.style.opacity = String(textA);
+    const elapsed = Math.min(200, Math.max(0, now - this.lastUpdate));
+    this.lastUpdate = now;
     let alpha: number;
     if (textA > 0 || p > 0 || this.hovered) alpha = 1;
     else if (this.touchActive) alpha = 0.5;
-    else alpha = 0;
+    else if (this.alwaysShow) {
+      const target = Math.min(1, Math.max(0, 1 - this.positionalAdjust));
+      const t = 1 - Math.pow(1 - elapsed / 200, 5);
+      alpha = this.alpha + (target - this.alpha) * t;
+    } else alpha = 0;
+    this.alpha = alpha;
     this.el.style.opacity = String(alpha);
     this.progressEl.style.background = `conic-gradient(#fff ${p * 360}deg, transparent 0deg)`;
     this.icon.style.transform = `scale(${1 + p * 0.2})`;

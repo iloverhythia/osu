@@ -1,7 +1,7 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // The PlayerLoader stage of gameplay: port of osu.Game/Screens/Play/PlayerLoader.cs (timings, content in/out transitions,
 // quick restart black layer, low-pass on the music), BeatmapMetadataDisplay.cs (layout) and PlayerLoaderDisclaimer.cs.
-// The player settings side panel (visual / audio / input settings) is not ported.
+// The player settings side panel (visual / audio / input settings) is in PlayerSettings.ts.
 
 import { APP_NAME } from '../../brand';
 import { MOD_BY_ACRONYM, type ModSet } from '../../game/mods/Mods';

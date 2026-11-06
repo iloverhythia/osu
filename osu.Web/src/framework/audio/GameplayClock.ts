@@ -29,6 +29,12 @@ export class GameplayClock {
     return this.running;
   }
 
+  /** Changes the playback rate (e.g. the replay player's user playback rate) for both the clock and the track. */
+  setRate(rate: number): void {
+    this.rate = rate;
+    this.track.rate = rate;
+  }
+
   seek(ms: number): void {
     this.time = ms;
     if (ms >= 0 && ms < this.track.length) this.track.currentTime = ms;

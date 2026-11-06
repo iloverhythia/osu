@@ -1,0 +1,298 @@
+/* PlayerSettingsGroup / SettingsToolboxGroup */
+.player-settings {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow-y: auto;
+  z-index: 6;
+  pointer-events: auto;
+  scrollbar-width: none;
+  transition: opacity 300ms cubic-bezier(0.23, 1, 0.32, 1), transform 300ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.player-settings.hidden {
+  opacity: 0;
+  transform: translateX(30px);
+  pointer-events: none;
+}
+
+.ps-group {
+  position: relative;
+  width: 270px;
+  flex: none;
+  border-radius: 5px;
+  overflow: hidden;
+  color: #fff;
+  font-family: var(--font);
+}
+
+.ps-bg {
+  position: absolute;
+  inset: 0;
+  background: hsl(255, 20%, 20%);
+  opacity: 0.1;
+  transition: opacity 500ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.ps-group:hover .ps-bg {
+  opacity: 1;
+}
+
+.ps-header {
+  position: relative;
+  height: 30px;
+  display: flex;
+  align-items: center;
+}
+
+.ps-title {
+  flex: 1;
+  padding: 0 30px 0 10px;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.ps-expand {
+  position: absolute;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 500ms;
+}
+
+.ps-group:hover .ps-expand {
+  opacity: 1;
+}
+
+.ps-expand span {
+  display: block;
+  height: 2px;
+  border-radius: 1px;
+  background: #fff;
+}
+
+.ps-group.collapsed .ps-content {
+  display: none;
+}
+
+.ps-group.collapsed .ps-title {
+  color: #b3b3b3;
+}
+
+.ps-content {
+  position: relative;
+  padding: 5px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.ps-label-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+.ps-value {
+  color: #fc2;
+  font-weight: 600;
+  text-align: right;
+}
+
+.ps-range {
+  width: 100%;
+  height: 16px;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ps-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #fc2 var(--p, 0%), rgba(255, 255, 255, 0.3) var(--p, 0%));
+}
+
+.ps-range::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #fc2 var(--p, 0%), rgba(255, 255, 255, 0.3) var(--p, 0%));
+}
+
+.ps-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  border: 3px solid #fc2;
+  background: #fff;
+}
+
+.ps-range::-moz-range-thumb {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 3px solid #fc2;
+  background: #fff;
+}
+
+.ps-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font: 400 14px var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ps-nub {
+  flex: none;
+  width: 28px;
+  height: 14px;
+  border: 2.5px solid #fc2;
+  border-radius: 7px;
+  transition: background 200ms, width 200ms;
+}
+
+.ps-checkbox.on .ps-nub {
+  width: 40px;
+  background: #fc2;
+}
+
+.ps-reference {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.ps-reference:empty {
+  display: none;
+}
+
+.ps-hint {
+  font-size: 13px;
+  color: #ddd;
+}
+
+.ps-warning {
+  font-size: 13px;
+  color: #ff6666;
+}
+
+.ps-button {
+  height: 30px;
+  border: 0;
+  border-radius: 5px;
+  background: hsl(255, 40%, 40%);
+  color: #fff;
+  font: 700 14px var(--font);
+  cursor: pointer;
+}
+
+.ps-button:hover {
+  filter: brightness(1.2);
+}
+
+.ps-controls {
+  display: flex;
+  justify-content: center;
+}
+
+.ps-play {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.ps-play:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ReplaySettingsOverlay: ExpandingContainer (0 → 290 wide) with a cog at its left edge. */
+.replay-settings {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 0;
+  z-index: 6;
+  transition: width 500ms cubic-bezier(0.23, 1, 0.32, 1), opacity 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.replay-settings.expanded {
+  width: 290px;
+}
+
+.rs-panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 100%;
+  overflow: hidden;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.8));
+}
+
+.rs-flow {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 270px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  pointer-events: auto;
+}
+
+.rs-cog {
+  position: absolute;
+  top: 130px;
+  right: calc(100% + 5px);
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #fff;
+  font-size: 20px;
+  line-height: 30px;
+  opacity: 0.8;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.rs-cog:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}

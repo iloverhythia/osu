@@ -156,6 +156,15 @@ class SettingsStore {
     for (const l of this.listeners) l(key, this.get(key));
   }
 
+  /** Resets every stored key starting with `prefix`; returns how many were reset. */
+  resetPrefix(prefix: string): number {
+    const keys = Object.keys(this.values).filter(k => k.startsWith(prefix));
+    for (const k of keys) delete this.values[k];
+    this.save();
+    for (const k of keys) for (const l of this.listeners) l(k, this.get(k));
+    return keys.length;
+  }
+
   subscribe(l: Listener): () => void {
     this.listeners.add(l);
     return () => this.listeners.delete(l);

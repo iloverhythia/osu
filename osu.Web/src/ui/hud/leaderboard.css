@@ -1,0 +1,180 @@
+/* DrawableGameplayLeaderboard (Argon HUD position 36, 115). */
+.gameplay-leaderboard {
+  position: absolute;
+  left: 36px;
+  top: 115px;
+  overflow: hidden;
+  pointer-events: none;
+  font-family: var(--font);
+  color: #fff;
+  z-index: 3;
+}
+
+.gl-flow {
+  position: absolute;
+  right: 0;
+  transition: opacity 100ms cubic-bezier(0.23, 1, 0.32, 1), top 300ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.gl-score-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 38px;
+  transform-origin: 0 0;
+  transition: transform 450ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Shear = OsuGame.SHEAR (0.2): skewX(-11.31deg). */
+.gl-panel {
+  display: inline-flex;
+  height: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+  transform-origin: 0 0;
+  transition: transform 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: inset 0 0 0 2px var(--gl-b1);
+  -webkit-mask-image: none;
+}
+
+.gl-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  padding: 2px;
+  background: linear-gradient(var(--gl-b0), var(--gl-b1));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.gl-panel {
+  box-shadow: none;
+}
+
+.gl-score-panel > .gl-panel {
+  transform: skewX(-11.3099deg);
+}
+
+.gl-left {
+  position: relative;
+  height: 100%;
+  transition: width 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.gl-left-bg,
+.gl-right-bg {
+  position: absolute;
+  inset: 0;
+}
+
+.gl-left-bg {
+  background: linear-gradient(var(--gl-l0), var(--gl-l1));
+}
+
+.gl-right-bg {
+  background: linear-gradient(var(--gl-r0), var(--gl-r1));
+}
+
+.gl-position-wrap {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 57px;
+  padding-right: calc(19px - 3.8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gl-position {
+  font-size: 14px;
+  font-weight: 600;
+  transform: skewX(11.3099deg);
+}
+
+.gl-avatar {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  padding: 1.3px;
+  margin-left: -19px;
+}
+
+.gl-avatar-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #3a2f55, #1d1830);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.gl-avatar-inner span {
+  transform: skewX(11.3099deg);
+}
+
+.gl-right {
+  position: relative;
+  height: 100%;
+  margin-left: -19px;
+  transition: width 500ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.gl-components {
+  position: absolute;
+  inset: 0;
+  padding: 5px 20px 5px calc(19px + 4px);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transform: skewX(11.3099deg);
+  transition-property: opacity;
+  transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.gl-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+
+.gl-username {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gl-score {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.gl-accuracy,
+.gl-combo {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}

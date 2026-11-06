@@ -103,6 +103,11 @@ export class HUDOverlay {
     this.setShowHud(show, now);
   }
 
+  /** The hide-target alpha (HUD components fade with it). */
+  hudAlpha(now: number): number {
+    return this.hideTargetAlpha.valueAt(now);
+  }
+
   setShowHud(show: boolean, now: number): void {
     if (show === this.showHud) return;
     this.showHud = show;

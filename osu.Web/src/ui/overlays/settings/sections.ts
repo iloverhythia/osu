@@ -320,11 +320,11 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
         header: 'HUD',
         items: [
           dropdown('HUD overlay visibility mode', 'gameplay.hudVisibilityMode', [['never', 'Never'], ['hideDuringGameplay', 'Hide during gameplay'], ['always', 'Always']] as const),
-          check('Show replay settings overlay', 'gameplay.replaySettingsOverlay', { unavailable: true }),
+          check('Show replay settings overlay', 'gameplay.replaySettingsOverlay'),
           check('Always show key overlay', 'gameplay.showKeyCounter'),
-          check('Always show gameplay leaderboard', 'gameplay.leaderboard', { unavailable: true }),
-          check('Require holding key to pause gameplay', 'gameplay.alwaysRequireHoldForPause', { unavailable: true }),
-          check('Always show hold for menu button', 'gameplay.alwaysShowHoldForMenu', { unavailable: true }),
+          check('Always show gameplay leaderboard', 'gameplay.leaderboard'),
+          check('Require holding key to pause gameplay', 'gameplay.alwaysRequireHoldForPause'),
+          check('Always show hold for menu button', 'gameplay.alwaysShowHoldForMenu'),
           check("Show health display even when you can't fail", 'gameplay.showHealthDisplayWhenCantFail'),
         ],
       },
@@ -397,7 +397,7 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
         items: [
           slider('Audio offset', 'audio.offset', -500, 500, 1, { keyboardStep: 1, format: v => `${v.toFixed(0)} ms`, keywords: ['universal', 'uo', 'timing', 'delay', 'latency'] }),
           check('Compensate for output latency', 'audio.compensateLatency', { hint: 'Uses the audio output latency reported by the browser.' }),
-          check('Adjust beatmap offset automatically', 'audio.autoAdjustOffset', { hint: 'If enabled, the offset suggested from last play on a beatmap is automatically applied.', unavailable: true }),
+          check('Adjust beatmap offset automatically', 'audio.autoAdjustOffset', { hint: 'If enabled, the offset suggested from last play on a beatmap is automatically applied.' }),
         ],
       },
     ],
@@ -491,7 +491,15 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
         items: [
           button('Delete ALL beatmaps', () => void deleteAllBeatmaps(), { dangerous: true }),
           button('Delete ALL beatmap videos', () => {}, { dangerous: true, unavailable: true }),
-          button('Reset ALL beatmap offsets', () => {}, { dangerous: true, unavailable: true }),
+          button(
+            'Reset ALL beatmap offsets',
+            async () => {
+              if (!(await confirmDialog(game, 'Are you sure you want to reset all local beatmap offsets? This cannot be undone!', 'Yes. Go for it.'))) return;
+              const n = settings.resetPrefix('offset.');
+              game.toast(`Reset ${n} beatmap offset${n === 1 ? '' : 's'}`, 'success');
+            },
+            { dangerous: true },
+          ),
           button('Restore all hidden difficulties', () => {}, { unavailable: true }),
           button('Restore all recently deleted beatmaps', () => {}, { unavailable: true }),
         ],

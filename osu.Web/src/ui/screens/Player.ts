@@ -4,6 +4,10 @@
 // BreakTracker, ComboEffects, FailAnimationContainer and the HUD (HUDOverlay + the Argon default layout). The HUD and overlay
 // components live in src/ui/hud.
 
+import { audioSettings, getBeatmapOffset, inputSettings, lastLocalPlay, playbackSettings, visualSettings } from '../hud/PlayerSettings';
+import { affectsUnstableRate } from '../ranking/RankingLogic';
+import { Database } from '../../game/storage/Database';
+import { GameplayLeaderboard } from '../hud/GameplayLeaderboard';
 import { getDisplayScore } from '../../game/scoring/DisplayScore';
 import type { AudioEngine, LoopingSample, Track } from '../../framework/audio/AudioEngine';
 import { GameplayClock } from '../../framework/audio/GameplayClock';
@@ -68,6 +72,10 @@ export class PlayerScreen extends Screen {
   private readonly bgDimEl: HTMLDivElement;
   private bgDimOpacity = -1;
   private bgBlur = 0;
+  private leaderboard: GameplayLeaderboard | null = null;
+  private readonly loaderSettings: HTMLDivElement;
+  private loaderSettingsHovered = false;
+  private replaySettings: HTMLElement | null = null;
 
   /** Player.BackgroundParallaxAmount */
   get backgroundParallaxAmount(): number {
@@ -200,6 +208,7 @@ export class PlayerScreen extends Screen {
       watching: replay ? `Watching ${replay.player}'s replay` : undefined,
     });
     this.replayLabel = h('div', { class: 'player-replay-label', style: { display: 'none' } });
+    this.loaderSettings = this.createLoaderSettings();
 
     const holdDelay = settings.get('ui.holdActivationDelay', 200);
     this.pauseMenu = new GameplayMenuOverlay('pause', { onResume: () => this.resume(), onRetry: () => this.retry(false), onQuit: () => this.performExitWithConfirmation() });
@@ -226,9 +235,25 @@ export class PlayerScreen extends Screen {
       this.pauseMenu.el,
       this.failMenu.el,
       this.loader.el,
+      this.loaderSettings,
       this.retryOverlay.el,
       this.exitOverlay.el,
     );
+  }
+
+  /** PlayerLoader.PlayerSettings: Visual / Audio / Input settings beside the loader (hovering it delays the push). */
+  private createLoaderSettings(): HTMLDivElement {
+    const el = h('div', { class: 'player-settings' }, visualSettings(), audioSettings(this.working.set.id, this.working.entry.audioFile, () => this.applyClockOffset()), inputSettings());
+    el.addEventListener('pointerenter', () => (this.loaderSettingsHovered = true));
+    el.addEventListener('pointerleave', () => (this.loaderSettingsHovered = false));
+    return el;
+  }
+
+  /** Global offset (+ output latency) and BeatmapUserSettings.Offset (positive = hit objects earlier). */
+  private applyClockOffset(): void {
+    if (!this.clock) return;
+    const global = settings.get('audio.offset', 0) + (settings.get('audio.compensateLatency', true) ? this.audio.outputLatency : 0);
+    this.clock.offset = global - getBeatmapOffset(this.working.set.id, this.working.entry.audioFile);
   }
 
   onEnter(): void {
@@ -306,7 +331,7 @@ export class PlayerScreen extends Screen {
     this.breakTracker = new BreakTracker(this.gameplayStart, this.playable.breaks);
 
     this.clock = new GameplayClock(this.track, this.mods.rate);
-    this.clock.offset = settings.get('audio.offset', 0) + (settings.get('audio.compensateLatency', true) ? this.audio.outputLatency : 0);
+    this.applyClockOffset();
     this.clock.seek(this.startTime);
     this.lastFrameGameTime = this.startTime;
 
@@ -615,6 +640,11 @@ export class PlayerScreen extends Screen {
       return true;
     }
     // HUDOverlay: Shift+Tab toggles the in-game interface; Control is held for the HUD.
+    // GlobalAction.ToggleReplaySettings (Ctrl+H)
+    if (e.code === 'KeyH' && (e.ctrlKey || e.metaKey) && this.replaySettings) {
+      if (!e.repeat) settings.set('gameplay.replaySettingsOverlay', !settings.get('gameplay.replaySettingsOverlay', true));
+      return true;
+    }
     if (e.code === 'Tab' && e.shiftKey) {
       if (!e.repeat && this.hud) settings.set('gameplay.hudVisibilityMode', this.hud.cycleMode());
       return true;
@@ -700,6 +730,7 @@ export class PlayerScreen extends Screen {
   private onPointerMove = (e: PointerEvent): void => {
     if (e.pointerType === 'mouse' && (e.movementX !== 0 || e.movementY !== 0)) this.holdForMenu.setTouchActive(false, performance.now());
     if (e.pointerType === 'mouse') this.hud?.setPointer(this.localPos(e));
+    this.holdForMenu.mouseMove(e.clientX, e.clientY);
     if (!this.gameplayStarted || this.paused || this.playback || this.failed) return;
     const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [e];
     for (const ev of events.length > 0 ? events : [e]) {
@@ -828,7 +859,11 @@ export class PlayerScreen extends Screen {
   private startGameplay(now: number): void {
     this.gameplayStarted = true;
     this.loader.contentOut();
-    setTimeout(() => this.loader.el.remove(), 700);
+    this.loaderSettings.classList.add('hidden');
+    setTimeout(() => {
+      this.loader.el.remove();
+      this.loaderSettings.remove();
+    }, 700);
     // PlayerLoader.OnSuspending: the (preview) track is stopped; ContentOut restores the low pass over 300ms.
     this.game.stopPreview();
     this.previewStopped = true;
@@ -859,10 +894,37 @@ export class PlayerScreen extends Screen {
       hudMode,
     );
     this.hud.keyCounter.isCounting = false;
+    if (!cinema && settings.get('gameplay.leaderboard', true)) void this.createLeaderboard();
     if (cinema) {
       this.hud.setShowHud(false, now);
       this.hud.showHudDisabled = true;
       this.breakOverlay.hidden = true;
+    }
+    // ReplayPlayer's PlayerSettingsOverlay (OsuSetting.ReplaySettingsOverlay): playback + visual settings.
+    if ((this.playback || this.autoplayInternal) && !cinema && settings.get('gameplay.replaySettingsOverlay', true)) {
+      const playback = playbackSettings({
+        isPaused: () => this.replayPaused,
+        togglePause: () => this.toggleReplayPause(),
+        setRate: r => this.clock.setRate(this.mods.rate * r),
+      });
+      // ReplaySettingsOverlay: collapsed to a cog below the top-right HUD elements, expanding while the mouse is at the right edge.
+      const flow = h('div', { class: 'rs-flow' }, playback, visualSettings(), audioSettings(this.working.set.id, this.working.entry.audioFile, () => this.applyClockOffset()));
+      const cog = h('button', { class: 'rs-cog', title: 'Replay settings (Ctrl+H)' }, '⚙');
+      const panel = h('div', { class: 'rs-panel' }, flow);
+      const root = h('div', { class: 'replay-settings' }, panel, cog);
+      let pinned = false;
+      cog.addEventListener('click', () => {
+        pinned = !root.classList.contains('expanded');
+        root.classList.toggle('expanded', pinned);
+      });
+      this.el.addEventListener('pointermove', e => {
+        if (!settings.get('gameplay.replaySettingsOverlay', true)) return;
+        const cogLeft = cog.getBoundingClientRect().left;
+        const dragging = e.buttons !== 0 && root.classList.contains('expanded');
+        root.classList.toggle('expanded', e.clientX >= cogLeft || dragging || (pinned && e.clientX >= window.innerWidth - 300));
+      });
+      this.replaySettings = root;
+      this.el.appendChild(root);
     }
     if (this.playback || this.autoplayInternal) {
       this.replayLabel.textContent = this.replay ? `Watching ${this.replay.player} play ${this.working.entry.title}` : 'AUTOPLAY';
@@ -1006,8 +1068,8 @@ export class PlayerScreen extends Screen {
       menu.back();
       return false;
     }
-    // HoldForMenuButton: GlobalAction.Back confirms immediately (not a dangerous action, AlwaysRequireHoldingForPause off).
-    this.holdForMenu.hold.confirm();
+    // HoldForMenuButton.HoldButton.OnPressed(GlobalAction.Back)
+    this.holdForMenu.back(performance.now());
     return false;
   }
 
@@ -1092,6 +1154,15 @@ export class PlayerScreen extends Screen {
         : this.replay,
       isReplay: this.replay != null,
     };
+    // SubmittingPlayer: SessionStatics.LastLocalUserScore (used by BeatmapOffsetControl's calibration).
+    if (!result.isReplay && !this.mods.isAutoplay) {
+      lastLocalPlay.value = {
+        setId: this.working.set.id,
+        audioFile: this.working.entry.audioFile,
+        hitErrors: result.hitEvents.filter(affectsUnstableRate).map(e => e.timeOffset),
+        offsetAtPlay: getBeatmapOffset(this.working.set.id, this.working.entry.audioFile),
+      };
+    }
     this.game.replace(new ResultsScreen(this.game, result));
   }
 
@@ -1107,6 +1178,7 @@ export class PlayerScreen extends Screen {
     if (this.audio) this.audio.musicFilter.frequency.value = this.audio.ctx.sampleRate / 2;
     this.drawable?.dispose?.();
     this.storyboard?.dispose();
+    this.holdForMenu.dispose();
     this.track?.dispose();
     if (this.previewStopped && !this.resultsShown && !this.isRestarting) void this.game.startPreview();
   }
@@ -1208,17 +1280,45 @@ export class PlayerScreen extends Screen {
         fadePlayfieldWhenHealthLow: settings.get('gameplay.fadePlayfieldWhenHealthLow', true),
         showHitErrorMeter: settings.get('gameplay.hitErrorMeter', true),
       });
+      if (this.leaderboard) {
+        // DrawableGameplayLeaderboard: expanded unless playing (CollapseDuringGameplay), or while holding for HUD.
+        this.leaderboard.update(now, { totalScore: this.scoreProcessor.totalScore, accuracy: this.scoreProcessor.accuracy, maxCombo: this.scoreProcessor.highestCombo }, !this.localUserPlaying || this.hud.holdingForHUD);
+        this.leaderboard.setAlpha(this.hud.hudAlpha(now));
+      }
+      if (this.replaySettings) this.replaySettings.style.opacity = settings.get('gameplay.replaySettingsOverlay', true) ? '1' : '0';
     }
 
     this.render(time, now);
   };
 
+  /** SoloGameplayLeaderboardProvider: local scores for this beatmap and ruleset, plus the tracked live score. */
+  private async createLeaderboard(): Promise<void> {
+    let records: Awaited<ReturnType<typeof Database.getScores>> = [];
+    try {
+      records = (await Database.getScores(this.working.entry.hash)).filter(s => s.rulesetId === this.ruleset.id);
+    } catch {
+      records = [];
+    }
+    if (this.disposed) return;
+    const rid = this.ruleset.id;
+    const maxStats = this.scoreProcessor.maximumStatistics;
+    const entries = records
+      .sort((a, b) => b.totalScore - a.totalScore)
+      .slice(0, 50)
+      .map(r => ({ player: r.player, totalScore: r.totalScore, accuracy: r.accuracy, maxCombo: r.maxCombo, displayScore: (t: number) => getDisplayScore(rid, t, r.maximumStatistics ?? r.statistics) }));
+    const local = { player: this.replay?.player ?? settings.get('ui.username', 'Guest'), totalScore: 0, accuracy: 1, maxCombo: 0, displayScore: (t: number) => getDisplayScore(rid, t, maxStats) };
+    this.leaderboard = new GameplayLeaderboard(entries, local, true);
+    this.el.appendChild(this.leaderboard.el);
+  }
+
   /** PlayerLoader.pushWhenLoaded (checked every frame after PlayerPushDelay). */
   private loaderFrame(now: number): void {
     if (this.pushAt == null) {
-      const ready = this.loaded && now >= this.loaderEnteredAt + this.loader.pushDelay && document.visibilityState === 'visible';
+      // ReadyForGameplay: not while the player settings are hovered.
+      const ready = this.loaded && now >= this.loaderEnteredAt + this.loader.pushDelay && document.visibilityState === 'visible' && !this.loaderSettingsHovered;
       if (ready) this.pushAt = now + (this.restart?.quick && this.loader.contentHidden ? 0 : 500);
-    } else if (now >= this.pushAt) this.startGameplay(now);
+    } else if (this.loaderSettingsHovered) this.pushAt = null; // cancelLoad
+    else if (now >= this.pushAt) this.startGameplay(now);
   }
 
   private currentDim(): number {
