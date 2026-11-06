@@ -51,7 +51,7 @@ export function entryFromBeatmap(filename: string, text: string, beatmap: Beatma
     audioFile: beatmap.metadata.audioFile,
     backgroundFile: beatmap.metadata.backgroundFile,
     previewTime: beatmap.metadata.previewTime,
-    bpm: 60000 / beatmap.controlPoints.mostCommonBeatLength(beatmap.lastObjectTime),
+    bpm: 60000 / beatmap.controlPoints.mostCommonBeatLength(beatmap.hitObjects.length > 0 ? beatmap.lastObjectTime : null),
     length,
     objectCount: beatmap.hitObjects.length,
     circleSize: beatmap.difficulty.circleSize,

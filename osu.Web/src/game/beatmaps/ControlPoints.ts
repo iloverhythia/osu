@@ -147,28 +147,35 @@ export class ControlPointInfo {
     return 60000 / Math.max(...this.timingPoints.map(t => t.beatLength));
   }
 
-  /** Port of Beatmap.GetMostCommonBeatLength. */
-  mostCommonBeatLength(lastTime: number): number {
-    if (this.timingPoints.length === 0) return TimingControlPoint.DEFAULT_BEAT_LENGTH;
+  /** Port of Beatmap.GetMostCommonBeatLength. `lastTime` is the end time of the last hit object (or null if there are none). */
+  mostCommonBeatLength(lastObjectTime: number | null): number {
+    const tps = this.timingPoints;
+    const lastTime = lastObjectTime ?? (tps.length > 0 ? tps[tps.length - 1].time : 0);
+    // Aggregate durations per beat length (rounded to 1e-3 ms), in order of first appearance like LINQ GroupBy.
     const durations = new Map<number, number>();
-    for (let i = 0; i < this.timingPoints.length; i++) {
-      const t = this.timingPoints[i];
-      if (t.time > lastTime) {
-        durations.set(t.beatLength, (durations.get(t.beatLength) ?? 0) + 0);
-        continue;
+    tps.forEach((t, i) => {
+      const key = Math.round(t.beatLength * 1000) / 1000;
+      let duration = 0;
+      if (t.time <= lastTime) {
+        // osu-stable forced the first control point to start at 0.
+        const currentTime = i === 0 ? 0 : t.time;
+        const nextTime = i === tps.length - 1 ? lastTime : tps[i + 1].time;
+        duration = nextTime - currentTime;
       }
-      const nextTime = i === this.timingPoints.length - 1 ? lastTime : this.timingPoints[i + 1].time;
-      const beatLength = Math.round(t.beatLength * 1000) / 1000;
-      durations.set(beatLength, (durations.get(beatLength) ?? 0) + (nextTime - t.time));
-    }
-    let best = this.timingPoints[0].beatLength;
-    let bestDuration = -1;
+      durations.set(key, (durations.get(key) ?? 0) + duration);
+    });
+    let best = 0;
+    let bestDuration = -Infinity;
+    // OrderByDescending is a stable sort, so the first group with the maximum duration wins.
     for (const [bl, d] of durations) {
       if (d > bestDuration) {
         best = bl;
         bestDuration = d;
       }
     }
-    return best;
+    if (best === 0) return TimingControlPoint.DEFAULT_BEAT_LENGTH;
+    const min = Math.min(...tps.map(t => t.beatLength));
+    const max = Math.max(...tps.map(t => t.beatLength));
+    return Math.min(Math.max(best, min), max);
   }
 }

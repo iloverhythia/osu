@@ -10,7 +10,7 @@ import type { Beatmap } from '../../game/beatmaps/Beatmap';
 import type { WorkingBeatmap } from '../../game/beatmaps/WorkingBeatmap';
 import type { ModSet } from '../../game/mods/Mods';
 import type { HealthProcessor } from '../../game/scoring/HealthProcessor';
-import { HitResult, affectsAccuracy, breaksCombo, isBasic, isHit } from '../../game/scoring/HitResult';
+import { HitResult, affectsAccuracy, affectsCombo, breaksCombo, isBasic, isHit } from '../../game/scoring/HitResult';
 import type { HitWindows } from '../../game/scoring/HitWindows';
 import type { JudgementResult } from '../../game/scoring/Judgement';
 import type { ScoreProcessor } from '../../game/scoring/ScoreProcessor';
@@ -199,8 +199,12 @@ export class PlayerScreen extends Screen {
     this.healthProcessor.applyBeatmap(p.perfectResults(), p.difficulty.drainRate, p.breaks, Math.max(...p.objectTimes.map(t => t.end)), p.objectTimes);
     const hp = this.healthProcessor;
     hp.noFail = this.mods.has('NF') || this.mods.isAutoplay;
-    if (this.mods.has('SD')) hp.failConditions.push(r => breaksCombo(r.type) || (r.type === HitResult.Miss && r.judgement.maxResult !== HitResult.IgnoreHit));
-    if (this.mods.has('PF')) hp.failConditions.push(r => affectsAccuracy(r.judgement.maxResult) && r.type !== r.judgement.maxResult);
+    // ModSuddenDeath.FailCondition
+    if (this.mods.has('SD')) hp.failConditions.push(r => affectsCombo(r.type) && !isHit(r.type));
+    // ModPerfect.FailCondition (osu!mania adds its own ManiaModPerfect condition, which allows Great hits).
+    const relevant = (x: HitResult) => affectsAccuracy(x) || affectsCombo(x);
+    if (this.mods.has('PF') && this.ruleset.shortName !== 'mania')
+      hp.failConditions.push(r => (relevant(r.judgement.minResult) || relevant(r.judgement.maxResult) || relevant(r.type)) && r.type !== r.judgement.maxResult);
     hp.onFail = () => this.onFail();
 
     // Hit windows for the hit error meter.
@@ -318,7 +322,9 @@ export class PlayerScreen extends Screen {
 
   private onFail(): void {
     if (this.failed || this.healthProcessor.noFail) return;
-    if (this.mods.has('EZ') && this.easyLives > 0 && !this.mods.has('SD') && !this.mods.has('PF')) {
+    // ModEasyWithExtraLives (osu! and osu!catch; TaikoModEasy has no extra lives, ManiaHealthProcessor handles its own).
+    const hasExtraLives = this.ruleset.shortName === 'osu' || this.ruleset.shortName === 'fruits';
+    if (hasExtraLives && this.mods.has('EZ') && this.easyLives > 0 && !this.mods.has('SD') && !this.mods.has('PF')) {
       // ModEasy: extra lives.
       this.easyLives--;
       this.healthProcessor.failed = false;
@@ -727,7 +733,8 @@ export class PlayerScreen extends Screen {
     g.textBaseline = 'bottom';
     g.font = `800 ${Math.round(46 * ui * (1 + this.comboPop * 0.12))}px ${font}`;
     g.fillStyle = '#fff';
-    g.fillText(`${sp.combo}x`, 16, hgt - 22);
+    // osu!mania draws its combo inside the playfield (like lazer's mania skin layout).
+    if (this.ruleset.shortName !== 'mania') g.fillText(`${sp.combo}x`, 16, hgt - 22);
 
     // Mods (top-right under accuracy).
     if (!this.mods.isEmpty) {

@@ -5,8 +5,9 @@ import type { Ruleset } from './Ruleset';
 import { osuRuleset } from './osu';
 import { catchRuleset } from './catch';
 import { taikoRuleset } from './taiko';
+import { maniaRuleset } from './mania';
 
-export const RULESETS: Ruleset[] = [osuRuleset, taikoRuleset, catchRuleset];
+export const RULESETS: Ruleset[] = [osuRuleset, taikoRuleset, catchRuleset, maniaRuleset];
 
 export function getRuleset(id: number): Ruleset {
   return RULESETS.find(r => r.id === id) ?? osuRuleset;
