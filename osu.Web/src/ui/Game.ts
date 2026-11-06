@@ -2,6 +2,8 @@
 // The top-level game (OsuGame equivalent): screen stack, background, global audio, overlays and import handling.
 
 import { VolumeOverlay } from './overlays/VolumeOverlay';
+import { SkinStore } from '../game/skinning/SkinStore';
+import { renderDemoBackground } from '../game/demo/Demo';
 import { MenuCursor } from './MenuCursor';
 import { APP_NAME } from '../brand';
 import { AudioEngine, Track } from '../framework/audio/AudioEngine';
@@ -101,6 +103,7 @@ export class Game {
 
     settings.subscribe(key => {
       if (key.startsWith('audio.')) this.applyVolumes();
+      if (key === 'ui.menuBackgroundSource' || key === 'skin.active') this.refreshBackground();
     });
     window.addEventListener('blur', () => this.applyVolumes());
     window.addEventListener('focus', () => this.applyVolumes());
@@ -249,7 +252,7 @@ export class Game {
     const previousAudio = this.working?.entry.audioFile;
     const old = this.working;
     this.working = new WorkingBeatmap(set, entry);
-    this.setBackground(this.working.getBackgroundUrl());
+    this.refreshBackground();
     if (playPreview && (previousSet !== set.id || previousAudio !== entry.audioFile)) void this.startPreview();
     // Keep the old working beatmap's object URLs alive while the track may still be playing from it.
     if (old && old.set.id !== set.id) setTimeout(() => old.dispose(), 2000);
@@ -333,6 +336,46 @@ export class Game {
     this.bgParallax.style.transform = `translate(${p.x.toFixed(2)}px, ${p.y.toFixed(2)}px) scale(${p.scale.toFixed(4)})`;
   }
 
+  private skinBackground: { id: string; url: string | null } | null = null;
+  private defaultMenuBackground: string | null = null;
+  private defaultMenuBackgroundPending = false;
+  private shownBackground: string | null | undefined = undefined;
+
+  /**
+   * BackgroundScreenDefault (main menu): OsuSetting.MenuBackgroundSource — the skin's menu-background (or the default
+   * backdrop), or the current beatmap's background. Other screens show the beatmap background.
+   */
+  refreshBackground(screen = this.currentScreen): void {
+    const beatmapUrl = this.working?.getBackgroundUrl() ?? null;
+    let url = beatmapUrl;
+    if (screen?.usesMenuBackground && settings.get<string>('ui.menuBackgroundSource', 'skin') === 'skin') {
+      const id = settings.get<string | null>('skin.active', null);
+      if (!id) {
+        // The default skin's menu background: JarvSU's own generated artwork (osu!'s are part of osu-resources).
+        url = this.defaultMenuBackground;
+        if (url === null && !this.defaultMenuBackgroundPending) {
+          this.defaultMenuBackgroundPending = true;
+          void renderDemoBackground().then(b => {
+            this.defaultMenuBackground = b ? URL.createObjectURL(b) : null;
+            this.refreshBackground();
+          });
+        }
+      }
+      else if (this.skinBackground?.id === id) url = this.skinBackground.url;
+      else {
+        url = null;
+        void SkinStore.get(id).then(rec => {
+          const file = rec && Object.entries(rec.files).find(([p]) => /^menu-background\.(jpe?g|png)$/i.test(p.split('/').pop() ?? ''));
+          this.skinBackground = { id, url: file ? URL.createObjectURL(file[1]) : null };
+          this.refreshBackground();
+        });
+      }
+    }
+    if (url === this.shownBackground) return;
+    this.shownBackground = url;
+    this.setBackground(url);
+  }
+
   setBackground(url: string | null): void {
     const next = this.bgFront === 'A' ? this.bgB : this.bgA;
     const prev = this.bgFront === 'A' ? this.bgA : this.bgB;
@@ -392,6 +435,7 @@ export class Game {
   }
 
   private showScreen(s: Screen): void {
+    this.refreshBackground(s);
     s.el.classList.remove('leaving');
     if (!s.el.isConnected) this.screenLayer.appendChild(s.el);
     s.el.style.display = '';

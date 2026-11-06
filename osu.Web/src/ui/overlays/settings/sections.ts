@@ -265,10 +265,10 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
         header: 'Main Menu',
         items: [
           check('Menu tips', 'ui.menuTips'),
-          check('Interface voices', 'ui.menuVoice', { unavailable: true }),
+          check('Interface voices', 'ui.menuVoice'),
           check(`${APP_NAME} music theme`, 'ui.menuMusic', { unavailable: true }),
-          dropdown('Intro sequence', 'ui.introSequence', [['circles', 'Circles'], ['welcome', 'Welcome'], ['triangles', 'Triangles'], ['random', 'Random']] as const, { unavailable: true }),
-          dropdown('Background source', 'ui.menuBackgroundSource', [['skin', 'Skin'], ['beatmap', 'Beatmap'], ['beatmapWithStoryboard', 'Beatmap (with storyboard / video)']] as const, { unavailable: true }),
+          dropdown('Intro sequence', 'ui.introSequence', [['circles', 'Circles'], ['triangles', 'Triangles'], ['random', 'Random']] as const, { hint: 'The Welcome intro uses osu! artwork and voices that cannot be included, so it is left out.' }),
+          dropdown('Background source', 'ui.menuBackgroundSource', [['skin', 'Skin'], ['beatmap', 'Beatmap'], ['beatmapWithStoryboard', 'Beatmap (with storyboard / video)']] as const),
           dropdown('Seasonal backgrounds', 'ui.seasonalBackgrounds', [['always', 'Always'], ['never', 'Never'], ['sometimes', 'Sometimes']] as const, { unavailable: true }),
         ],
       },

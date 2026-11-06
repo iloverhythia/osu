@@ -10,6 +10,11 @@ export abstract class Screen {
   /** Canvases making up the screen, bottom to top, for F12 screenshots (null when the screen isn't canvas-drawn). */
   screenshotLayers?(): HTMLCanvasElement[];
 
+  /** BackgroundScreenDefault: the main menu shows the MenuBackgroundSource background. */
+  get usesMenuBackground(): boolean {
+    return false;
+  }
+
   /** Whether the menu cursor is shown (the osu! ruleset provides its own cursor during gameplay). */
   get cursorVisible(): boolean {
     return true;

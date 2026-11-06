@@ -11,6 +11,7 @@ import type { Game } from '../Game';
 import { MenuBeatSource } from '../menu/BeatSync';
 import { ButtonSystem, ButtonSystemState } from '../menu/ButtonSystem';
 import { TrianglesIntroSequence, TRACK_START_DELAY } from '../menu/IntroTriangles';
+import { CirclesIntroSequence, CIRCLES_TRACK_START_DELAY } from '../menu/IntroCircles';
 import { KiaiMenuFountains } from '../menu/KiaiMenuFountains';
 import { MenuSideFlashes } from '../menu/MenuSideFlashes';
 import { OsuLogo } from '../menu/OsuLogo';
@@ -48,7 +49,8 @@ export class MainMenuScreen extends Screen {
   private readonly bottomScale = new Anim(1);
 
   private phase: Phase = 'gate';
-  private intro: TrianglesIntroSequence | null = null;
+  private intro: TrianglesIntroSequence | CirclesIntroSequence | null = null;
+  private circlesIntro: CirclesIntroSequence | null = null;
   private readonly flashAlpha = new Anim(0);
   private trackFade: { track: NonNullable<Game['previewTrack']>; start: number } | null = null;
   private raf = 0;
@@ -56,6 +58,10 @@ export class MainMenuScreen extends Screen {
   private frame = 0;
   private lastInput = clockNow();
   private readonly onInput = () => (this.lastInput = clockNow());
+
+  get usesMenuBackground(): boolean {
+    return true;
+  }
 
   /** ScrollAdjustsVolume */
   get scrollAdjustsVolume(): boolean {
@@ -194,10 +200,23 @@ export class MainMenuScreen extends Screen {
       this.game.select(s, s.beatmaps[0], false);
     }
 
-    this.intro = new TrianglesIntroSequence(t, () => this.onIntroComplete());
-    // Non-themed intro: the intro voice (synthesised stand-in), then StartTrack after TRACK_START_DELAY.
-    this.game.playUiSample('menu-confirm', 0.6);
-    setTimeout(() => void this.startTrack(audio), TRACK_START_DELAY);
+    // OsuSetting.IntroSequence (Random picks one of the available intros).
+    let kind = settings.get<string>('ui.introSequence', 'triangles');
+    if (kind === 'random') kind = Math.random() < 0.5 ? 'circles' : 'triangles';
+    if (kind === 'circles') {
+      // IntroCircles.LogoArriving: welcome voice, StartTrack after TRACK_START_DELAY, LoadMenu after delay_for_menu;
+      // the logo plays its intro (content hidden for the sequence's length).
+      const circles = new CirclesIntroSequence(t, () => this.onIntroComplete());
+      this.intro = circles;
+      this.circlesIntro = circles;
+      if (settings.get('ui.menuVoice', true)) this.game.playUiSample('menu-confirm', 0.6);
+      setTimeout(() => void this.startTrack(audio), CIRCLES_TRACK_START_DELAY);
+    } else {
+      this.intro = new TrianglesIntroSequence(t, () => this.onIntroComplete());
+      // Non-themed intro: the intro voice (synthesised stand-in), then StartTrack after TRACK_START_DELAY.
+      if (settings.get('ui.menuVoice', true)) this.game.playUiSample('menu-confirm', 0.6);
+      setTimeout(() => void this.startTrack(audio), TRACK_START_DELAY);
+    }
   }
 
   /** IntroScreen.StartTrack (non-themed): PrepareTrackForPreview(false, -2600), VolumeTo(0) → VolumeTo(1, 2600, InCubic). */
@@ -315,8 +334,11 @@ export class MainMenuScreen extends Screen {
     this.intro?.drawAdditive(ga, w, h, t);
 
     const gl = this.resize(this.logoLayer, w, h, dpr);
-    this.intro?.draw(gl, w, h, t);
-    this.logo.draw(gl, w, h);
+    if (this.intro !== this.circlesIntro) this.intro?.draw(gl, w, h, t);
+    // OsuLogo.PlayIntro: logo content hidden for the sequence's length, then FadeIn(200); the sequence is drawn above it.
+    const circlesStillShowing = this.circlesIntro ? this.circlesIntro.draw(gl, w, h, t) : false;
+    if (!circlesStillShowing && this.circlesIntro) this.circlesIntro = null;
+    if (!this.circlesIntro) this.logo.draw(gl, w, h);
     this.logo.layoutHitArea(w, h);
   }
 
