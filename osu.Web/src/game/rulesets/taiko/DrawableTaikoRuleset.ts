@@ -5,9 +5,13 @@
 //  - osu.Game.Rulesets.Taiko/UI/TaikoPlayfield.cs, DrawableTaikoRuleset.cs, DrumSamplePlayer.cs, DrumSampleTriggerSource.cs,
 //    DrumTouchInputArea.cs, HitExplosion.cs, KiaiHitExplosion.cs, DrawableTaikoJudgement.cs
 //  - Mods: TaikoModHidden, TaikoModFlashlight, TaikoModRelax, ModCinema; Replays: TaikoAutoGenerator / FramedReplayInputHandler.
-// Visuals are drawn procedurally after the default ("triangles") taiko skin pieces (osu.Game.Rulesets.Taiko/Skinning/Default/*),
+// Visuals are drawn procedurally after the default (Argon) taiko skin pieces (osu.Game.Rulesets.Taiko/Skinning/Argon/*:
+// ArgonCirclePiece + Centre/Rim/Elongated/Swell pieces, RingPiece, ArgonTickPiece, ArgonBarLine, ArgonHitTarget, ArgonHitExplosion,
+// ArgonInputDrum, ArgonJudgementPiece, ArgonPlayfieldBackgroundLeft/Right, ArgonSwell -> Default/DefaultSwell),
 // or with legacy skin elements by TaikoLegacySkinRenderer (legacySkin.ts) when a user / beatmap skin provides them.
 import { TaikoLegacySkinRenderer } from './legacySkin';
+import { Easing, applyEasing } from '../../storyboard/Easing';
+import { FA_ANGLE_LEFT, FA_ASTERISK, type Glyph, clamp01, css, drawCircleGlow, drawIcon, drawSpacedText, fillCircle, fillPillBorder, roundRectPath, seededRandom } from './argonDraw';
 
 import { HIT_CLAP, HIT_FINISH, HIT_NORMAL, HIT_WHISTLE, HitSampleInfo } from '../../audio/HitSampleInfo';
 import { HitResult, isHit } from '../../scoring/HitResult';
@@ -54,9 +58,6 @@ export const SECOND_HIT_WINDOW = 30;
 const RING_APPEAR_OFFSET = 100;
 /** DrawableDrumRoll.rolling_hits_for_engaged_colour */
 const ROLLING_HITS_FOR_ENGAGED_COLOUR = 5;
-/** CirclePiece constants */
-const SYMBOL_SIZE = DEFAULT_SIZE;
-const SYMBOL_BORDER = 8;
 const PRE_BEAT_TRANSITION_TIME = 80;
 const KIAI_FLASH_OPACITY = 0.15;
 /** TaikoModHidden */
@@ -64,41 +65,84 @@ const HD_FADE_OUT_START_TIME = 1;
 const HD_FADE_OUT_DURATION = 0.375;
 /** DrumSampleTriggerSource stereo spread per sample (ApplySampleInfo: -0.05 + RNG.NextDouble(0.1)). */
 const SAMPLE_BALANCE_SPREAD = 0.1;
+/** DrawableHit gravity_time / gravity_travel_height */
+const GRAVITY_TIME = 300;
+const GRAVITY_TRAVEL_HEIGHT = 200;
+/** DrawableBarLine tracker_width, ArgonBarLine major_extension */
+const BAR_LINE_WIDTH = 2;
+const BAR_LINE_MAJOR_EXTENSION = 10;
 
 type RGB = [number, number, number];
-const COLOUR_CENTRE: RGB = Hit.COLOUR_CENTRE;
-const COLOUR_RIM: RGB = Hit.COLOUR_RIM;
 const YELLOW_DARK: RGB = [0xee, 0xaa, 0x00];
 const YELLOW_DARKER: RGB = [0xcc, 0x66, 0x00];
 const YELLOW_LIGHT: RGB = [0xff, 0xdd, 0x55];
 const PINK: RGB = [0xff, 0x66, 0xaa];
 const BLUE: RGB = [0x66, 0xcc, 0xff];
-const PINK_DARKER: RGB = [0xbb, 0x11, 0x77];
-const BLUE_DARKER: RGB = [0x22, 0x99, 0xbb];
-const KIAI_GLOW_COLOUR: RGB = [255, 228, 0];
+const WHITE: RGB = [255, 255, 255];
 
-const RESULT_COLOURS: Partial<Record<HitResult, string>> = {
-  [HitResult.Great]: '#66ccff',
-  [HitResult.Ok]: '#88b300',
-  [HitResult.Miss]: '#ed1121',
+// ---- Argon skin (osu.Game.Rulesets.Taiko/Skinning/Argon/*)
+/** ArgonCirclePiece.ICON_SIZE */
+const ARGON_ICON_SIZE = 20 / 70;
+/** ArgonTickPiece tick_size */
+const ARGON_TICK_SIZE = (1 / DEFAULT_SIZE) * ARGON_ICON_SIZE;
+/** ColourInfo.GradientVertical accents of ArgonCentreCirclePiece / ArgonRimCirclePiece / ArgonElongatedCirclePiece / ArgonSwellCirclePiece */
+const ARGON_CENTRE: readonly [RGB, RGB] = [
+  [241, 0, 0],
+  [167, 0, 0],
+];
+const ARGON_RIM: readonly [RGB, RGB] = [
+  [0, 161, 241],
+  [0, 111, 167],
+];
+const ARGON_DRUM_ROLL: readonly [RGB, RGB] = [
+  [241, 161, 0],
+  [167, 111, 0],
+];
+const ARGON_SWELL: readonly [RGB, RGB] = [
+  [240, 201, 0],
+  [167, 139, 0],
+];
+/** ArgonInputDrum */
+const RIM_HIT_GRADIENT: readonly [RGB, RGB] = [
+  [227, 248, 255],
+  [198, 245, 255],
+];
+const RIM_HIT_GLOW: RGB = [126, 215, 253];
+const CENTRE_HIT_GRADIENT: readonly [RGB, RGB] = [
+  [255, 227, 236],
+  [255, 198, 211],
+];
+const CENTRE_HIT_GLOW: RGB = [255, 147, 199];
+const RIM_SIZE = 0.3;
+const MIDDLE_SPLIT = 6;
+const GRAY_38: RGB = [38, 38, 38];
+const GRAY_48: RGB = [48, 48, 48];
+const GRAY_51: RGB = [51, 51, 51];
+const GRAY_64: RGB = [64, 64, 64];
+
+/** OsuColour.ForHitResult */
+const RESULT_COLOURS: Partial<Record<HitResult, RGB>> = {
+  [HitResult.Great]: [0x66, 0xcc, 0xff],
+  [HitResult.Ok]: [0x88, 0xb3, 0x00],
+  [HitResult.Miss]: [0xed, 0x11, 0x21],
 };
+/** HitResult.GetDescription().ToUpperInvariant() */
 const RESULT_TEXT: Partial<Record<HitResult, string>> = {
   [HitResult.Great]: 'GREAT',
   [HitResult.Ok]: 'OK',
   [HitResult.Miss]: 'MISS',
 };
+/** Torus is substituted by the app font. */
+const FONT = '"Exo 2", system-ui, sans-serif';
 
-const css = (c: RGB, a = 1): string => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
 const lerpRGB = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
-
-// Easing (osu.Framework.Graphics.Easing)
-const outQuad = (t: number): number => 1 - (1 - t) * (1 - t);
-const inQuad = (t: number): number => t * t;
 const outQuint = (t: number): number => 1 - Math.pow(1 - t, 5);
-const inQuint = (t: number): number => Math.pow(t, 5);
-const outSine = (t: number): number => Math.sin((t * Math.PI) / 2);
-const outElastic = (t: number): number => (t <= 0 ? 0 : t >= 1 ? 1 : Math.pow(2, -10 * t) * Math.sin(((t - 0.075) * (2 * Math.PI)) / 0.3) + 1);
+const horizontalGradient = (ctx: CanvasRenderingContext2D, x0: number, x1: number, colours: readonly [RGB, RGB]): CanvasGradient => {
+  const g = ctx.createLinearGradient(x0, 0, x1, 0);
+  g.addColorStop(0, css(colours[0]));
+  g.addColorStop(1, css(colours[1]));
+  return g;
+};
 
 /** Interpolation.DampContinuously */
 const damp = (current: number, target: number, halfTime: number, elapsed: number): number => target + (current - target) * Math.pow(0.5, elapsed / halfTime);
@@ -192,37 +236,17 @@ interface Explosion {
   secondHitTime: number | null;
 }
 
-interface KiaiExplosion {
-  time: number;
-  rim: boolean;
-}
-
 interface JudgementPopup {
   time: number;
   result: HitResult;
+  /** Seed for the RingExplosion's random directions / distances. */
+  seed: number;
 }
 
 interface FlyingHit {
   time: number;
   rim: boolean;
   strong: boolean;
-}
-
-// ------------------------------------------------------------------ sprite cache
-
-type SpriteCanvas = HTMLCanvasElement | OffscreenCanvas;
-
-function createCanvas(w: number, h: number): SpriteCanvas | null {
-  w = Math.max(1, Math.ceil(w));
-  h = Math.max(1, Math.ceil(h));
-  if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h);
-  if (typeof document !== 'undefined') {
-    const c = document.createElement('canvas');
-    c.width = w;
-    c.height = h;
-    return c;
-  }
-  return null;
 }
 
 // ------------------------------------------------------------------ drawable ruleset
@@ -266,14 +290,13 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
 
   // effects
   private readonly explosions: Explosion[] = [];
-  private readonly kiaiExplosions: KiaiExplosion[] = [];
   private readonly judgements: JudgementPopup[] = [];
   private readonly flyingHits: FlyingHit[] = [];
-  private readonly drumPress: Record<TaikoAction, { time: number; peak: number }> = {
-    LeftRim: { time: -Infinity, peak: 0 },
-    LeftCentre: { time: -Infinity, peak: 0 },
-    RightCentre: { time: -Infinity, peak: 0 },
-    RightRim: { time: -Infinity, peak: 0 },
+  private readonly drumPress: Record<TaikoAction, { time: number; from: number; peak: number }> = {
+    LeftRim: { time: -Infinity, from: 0, peak: 0 },
+    LeftCentre: { time: -Infinity, from: 0, peak: 0 },
+    RightCentre: { time: -Infinity, from: 0, peak: 0 },
+    RightRim: { time: -Infinity, from: 0, peak: 0 },
   };
   private kiaiGlowAlpha = 0;
   private kiaiGlowBumpTime = -Infinity;
@@ -299,8 +322,6 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
   private height = 0;
   private layout: TaikoLayout = { scale: 1, top: 0, width: 1, unit: 1 };
   private timeRange = 1000;
-  private spriteScale = -1;
-  private readonly sprites = new Map<string, SpriteCanvas | null>();
 
   readonly drawsCursor = false;
 
@@ -668,12 +689,11 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
 
       case 'hit': {
         if (type !== HitResult.Great && type !== HitResult.Ok && type !== HitResult.Miss) break;
-        this.judgements.push({ time, result: type });
+        this.judgements.push({ time, result: type, seed: Math.round(time * 16) ^ (e.obj.startTime | 0) });
         const rim = (e.obj as Hit).type === HitType.Rim;
         const explosion: Explosion = { time, result: type, rim, secondHitTime: null };
         e.explosion = explosion;
         this.explosions.push(explosion);
-        if (e.obj.kiai) this.kiaiExplosions.push({ time, rim });
         break;
       }
     }
@@ -791,7 +811,6 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
 
     // Expire finished effects.
     pruneBefore(this.explosions, time - 1000);
-    pruneBefore(this.kiaiExplosions, time - 500);
     pruneBefore(this.judgements, time - 800);
     pruneBefore(this.flyingHits, time - 900);
 
@@ -863,10 +882,12 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
   private onDrumVisual(action: TaikoAction, time: number, down: boolean): void {
     const seg = this.touchSegmentState[action];
     if (down) {
-      // DefaultInputDrum.TaikoHalfDrum.OnPressed
+      // ArgonInputDrum.TaikoHalfDrum.OnPressed: FadeTo(Math.Min(Alpha + 0.5, 1), 40, OutQuint).Then().FadeOut(750, OutQuint)
       const d = this.drumPress[action];
       this.legacy?.onDrumPressed(action, time);
-      d.peak = Math.min(this.drumOverlayAlpha(action, time) + 0.5, 1);
+      const current = this.drumOverlayAlpha(action, time);
+      d.from = current;
+      d.peak = Math.min(current + 0.5, 1);
       d.time = time;
       seg.pressTime = this.realNow;
       seg.releaseTime = Infinity;
@@ -881,8 +902,8 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
     const e = time - d.time;
     if (e < 0) return 0;
     const downTime = 40;
-    const upTime = 1000;
-    if (e < downTime) return d.peak * outQuint(e / downTime);
+    const upTime = 750;
+    if (e < downTime) return d.from + (d.peak - d.from) * outQuint(e / downTime);
     return d.peak * (1 - outQuint(clamp01((e - downTime) / upTime)));
   }
 
@@ -925,10 +946,6 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
     this.updateLayout(width, height);
     const L = this.layout;
     const s = L.scale;
-    if (s !== this.spriteScale) {
-      this.sprites.clear();
-      this.spriteScale = s;
-    }
 
     if (!this.cinema) {
       ctx.save();
@@ -947,49 +964,40 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
     const beat = this.beatState(now);
     const legacy = this.legacy;
 
-    // PlayfieldBackgroundRight
+    // PlayfieldBackgroundRight (ArgonPlayfieldBackgroundRight: black box, alpha 0.7)
     if (legacy?.has.barRight) legacy.drawBackgroundRight(ctx, W, PF_H, now, this.isKiai(now));
     else {
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
       ctx.fillRect(0, 0, W, PF_H);
-      ctx.strokeStyle = '#111';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(1, 1, W - 2, PF_H - 2);
     }
 
-    // PlayfieldBackgroundLeft (displayed inside LegacyInputDrum for legacy skins providing "taiko-bar-right")
+    // "Left overlay": PlayfieldBackgroundLeft (ArgonPlayfieldBackgroundLeft: black box) + the proxied input drum.
+    // (Legacy skins providing "taiko-bar-right" display the left background inside LegacyInputDrum.)
     if (!legacy?.has.barRight) {
-      ctx.fillStyle = '#111';
+      ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, INPUT_DRUM_WIDTH, PF_H);
-      const shadow = ctx.createLinearGradient(INPUT_DRUM_WIDTH, 0, INPUT_DRUM_WIDTH + 10, 0);
-      shadow.addColorStop(0, 'rgba(0,0,0,0.6)');
-      shadow.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = shadow;
-      ctx.fillRect(INPUT_DRUM_WIDTH, 0, 10, PF_H);
     }
 
-    if (legacy?.has.inputDrum) {
-      legacy.drawInputDrum(ctx, INPUT_DRUM_WIDTH, PF_H, now);
-      this.drawDrumCombo(ctx);
-    } else this.drawInputDrum(ctx, now);
+    if (legacy?.has.inputDrum) legacy.drawInputDrum(ctx, INPUT_DRUM_WIDTH, PF_H, now);
+    else this.drawInputDrum(ctx, now);
+    this.drawDrumCombo(ctx);
 
-    // Elements behind hit objects: kiai glow, hit explosions, hit target
+    // "Elements behind hit objects": kiai glow (argon: none), hit explosions, hit target
     if (legacy?.has.kiaiGlow) legacy.drawKiaiGlow(ctx, HIT_X, CENTRE_Y, this.kiaiGlowAlpha, this.kiaiGlowBumpTime, now);
-    else this.drawKiaiGlow(ctx, now);
     if (legacy?.has.explosions) {
       for (const ex of this.explosions) legacy.drawExplosion(ctx, HIT_X, CENTRE_Y, ex.result, ex.time, ex.secondHitTime, now);
     } else this.drawExplosions(ctx, now);
     if (legacy?.has.hitTarget) legacy.drawHitTarget(ctx, HIT_X, CENTRE_Y);
     else this.drawHitTarget(ctx);
 
-    // Bar lines
+    // "Bar line content" (not masked)
     this.drawBarLines(ctx, now);
 
-    // Masked hit objects content
+    // "Masked hit objects content"
     const proxied: Entry[] = [];
     ctx.save();
     ctx.beginPath();
-    ctx.rect(HIT_X, 0, W - HIT_X, PF_H);
+    ctx.rect(HIT_X, -PF_H, W - HIT_X, PF_H * 3);
     ctx.clip();
     let end = this.renderStart;
     while (end < this.entries.length && this.entries[end].obj.startTime <= now + this.timeRange * this.visibleAheadFactor + 1000) end++;
@@ -1004,21 +1012,19 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
     }
     ctx.restore();
 
-    // Overlay content: kiai explosions, judgements (hidden when a legacy skin provides explosion sprites)
-    if (!legacy?.has.explosions) {
-      this.drawKiaiExplosions(ctx, now);
-      this.drawJudgements(ctx, now);
-    }
+    // "Overlay content": judgements (hidden when a legacy skin provides explosion sprites).
+    // TaikoExplosionKiai is an expired empty drawable in the argon skin.
+    if (!legacy?.has.explosions) this.drawJudgements(ctx, now);
 
-    // Top level hit objects (proxied content), earliest on top.
+    // "Top level hit objects" (proxied content), earliest on top.
     for (const e of proxied) this.drawEntry(ctx, e, now, beat);
 
-    // Drum roll flying hits (proxied above everything)
-    this.drawFlyingHits(ctx, now, beat);
+    // Drum roll flying hits (DrumRollHitContainer proxy, above everything)
+    this.drawFlyingHits(ctx, now);
   }
 
   private isProxied(e: Entry, now: number): boolean {
-    if (e.obj instanceof Hit) return e.isHit;
+    if (e.obj instanceof Hit) return e.isHit && this.hitAnimations;
     if (e.obj instanceof Swell) return now >= e.obj.startTime - RING_APPEAR_OFFSET;
     return false;
   }
@@ -1032,7 +1038,21 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
 
   private hitAnimationLength(): number {
     // Rate independent to match stable.
-    return 300 * (this.rateAdjustedHitAnimations ? 1 : Math.abs(this.ctx.rate));
+    return GRAVITY_TIME * (this.rateAdjustedHitAnimations ? 1 : Math.abs(this.ctx.rate));
+  }
+
+  /**
+   * DrawableHit.UpdateHitStateTransforms(ArmedState.Hit), relative to the hit time:
+   * ScaleTo(0.8, length * 2, OutQuad); MoveToY(-200, length, Out).Then().MoveToY(400, length * 2, In); FadeOut(800).
+   */
+  private hitGravity(t: number): { y: number; scale: number; alpha: number } {
+    const length = this.hitAnimationLength();
+    const scale = 1 - 0.2 * applyEasing(Easing.OutQuad, clamp01(t / (length * 2)));
+    const y =
+      t < length
+        ? -GRAVITY_TRAVEL_HEIGHT * applyEasing(Easing.Out, t / length)
+        : -GRAVITY_TRAVEL_HEIGHT + GRAVITY_TRAVEL_HEIGHT * 3 * applyEasing(Easing.In, clamp01((t - length) / (length * 2)));
+    return { y, scale, alpha: 1 - clamp01(t / 800) };
   }
 
   private drawHit(ctx: CanvasRenderingContext2D, e: Entry, h: Hit, now: number, beat: BeatState): void {
@@ -1041,130 +1061,76 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
     let y = CENTRE_Y;
     let alpha = this.hiddenAlpha(h, now);
     let scale = 1;
-    let flash = 0;
+    let flash = beat.flash;
 
     if (e.judged) {
       const t = now - e.resultTime;
       if (t < 0) {
         // not yet (rewinding) - draw normally
       } else if (!e.isHit) {
+        // ArmedState.Miss: FadeOut(hitAnimations ? 100 : 60). The flash layer keeps its last kiai pulse.
         alpha *= 1 - clamp01(t / (this.hitAnimations ? 100 : 60));
       } else if (!this.hitAnimations) {
         alpha = 0;
       } else {
-        // DrawableHit.UpdateHitStateTransforms(ArmedState.Hit)
-        const gravityTime = this.hitAnimationLength();
-        const gravityTravelHeight = 200;
-        scale = 1 - 0.2 * outQuad(clamp01(t / (gravityTime * 2)));
-        y += t < gravityTime ? -gravityTravelHeight * outQuad(t / gravityTime) : -gravityTravelHeight + gravityTravelHeight * 2 * inQuad(clamp01((t - gravityTime) / (gravityTime * 2)));
-        alpha *= 1 - clamp01(t / 800);
-        // CirclePiece: flashBox.FadeTo(0.9f).FadeOut(300)
-        flash = 0.9 * (1 - clamp01(t / 300));
+        const g = this.hitGravity(t);
+        scale = g.scale;
+        y += g.y;
+        alpha *= g.alpha;
+        // ArgonCirclePiece: flash.FadeTo(0.9f).FadeOut(500, Easing.OutQuint)
+        flash = 0.9 * (1 - applyEasing(Easing.OutQuint, clamp01(t / 500)));
       }
     }
     if (alpha <= 0.001) return;
     if (x - D / 2 > this.layout.width || x + D < -200) return;
 
-    if (!e.judged) flash = beat.flash;
-    if (this.legacy?.has.hitCircle) this.legacy.drawHit(ctx, x, y, D * scale, h.type === HitType.Rim, h.isStrong, alpha, this.ctx.combo, h.startTime, now);
-    else this.drawCirclePiece(ctx, x, y, D * scale, h.type === HitType.Rim ? COLOUR_RIM : COLOUR_CENTRE, h.type === HitType.Rim ? 'rim' : 'centre', alpha, flash, beat.glow);
+    const rim = h.type === HitType.Rim;
+    if (this.legacy?.has.hitCircle) this.legacy.drawHit(ctx, x, y, D * scale, rim, h.isStrong, alpha, this.ctx.combo, h.startTime, now);
+    else this.drawArgonCirclePiece(ctx, x - (D * scale) / 2, y - (D * scale) / 2, D * scale, D * scale, rim ? ARGON_RIM : ARGON_CENTRE, FA_ANGLE_LEFT, alpha, flash);
   }
 
-  /** CirclePiece (+ CentreHitCirclePiece / RimHitCirclePiece / SwellCirclePiece symbols). */
-  private drawCirclePiece(ctx: CanvasRenderingContext2D, x: number, y: number, D: number, accent: RGB, symbol: 'centre' | 'rim' | 'swell' | 'none', alpha: number, flash: number, glowAlpha: number, rotation = 0): void {
-    const r = D / 2;
-    ctx.globalAlpha = alpha;
+  /**
+   * ArgonCirclePiece (+ ArgonCentreCirclePiece / ArgonRimCirclePiece / ArgonElongatedCirclePiece / ArgonSwellCirclePiece):
+   * a black (alpha 190/255) circle, a 20/70 ring of the accent gradient at half opacity, a 5/70 ring of the accent gradient,
+   * an additive white flash layer and a white FontAwesome icon (ICON_SIZE, scale (0.8, 1)).
+   */
+  private drawArgonCirclePiece(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, accent: readonly [RGB, RGB], icon: Glyph | null, alpha: number, flash: number, rotation = 0): void {
+    if (h <= 0) return;
+    const r = h / 2;
+    const prev = ctx.globalAlpha;
+    ctx.globalAlpha = prev * alpha;
 
-    // Glow edge effect (radius 8)
-    this.drawGlowSprite(ctx, x, y, r, 8, accent, glowAlpha * alpha);
-
-    // Background
-    ctx.fillStyle = css(accent);
+    ctx.fillStyle = 'rgba(0,0,0,0.7451)';
     ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
+    roundRectPath(ctx, x, y, w, h, r);
     ctx.fill();
 
-    // Ring (border 8) + flash box (additive)
-    if (flash > 0) {
+    const gradient = (a: number): CanvasGradient => {
+      const g = ctx.createLinearGradient(0, y, 0, y + h);
+      g.addColorStop(0, css(accent[0], a));
+      g.addColorStop(1, css(accent[1], a));
+      return g;
+    };
+    ctx.fillStyle = gradient(0.5);
+    fillPillBorder(ctx, x, y, w, h, (20 / 70) * h);
+    ctx.fillStyle = gradient(1);
+    fillPillBorder(ctx, x, y, w, h, (5 / 70) * h);
+
+    if (flash > 0.001) {
       ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = alpha * flash;
+      ctx.globalAlpha = prev * alpha * flash;
       ctx.fillStyle = '#fff';
       ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
+      roundRectPath(ctx, x, y, w, h, r);
       ctx.fill();
       ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = alpha;
+      ctx.globalAlpha = prev * alpha;
     }
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = SYMBOL_BORDER;
-    ctx.beginPath();
-    ctx.arc(x, y, Math.max(0, r - SYMBOL_BORDER / 2), 0, Math.PI * 2);
-    ctx.stroke();
 
-    // Symbol
-    const symbolSize = D * SYMBOL_SIZE;
-    ctx.fillStyle = '#fff';
-    switch (symbol) {
-      case 'centre':
-        ctx.beginPath();
-        ctx.arc(x, y, Math.max(0, symbolSize / 2 - SYMBOL_BORDER), 0, Math.PI * 2);
-        ctx.fill();
-        break;
-      case 'rim':
-        ctx.beginPath();
-        ctx.arc(x, y, Math.max(0, symbolSize / 2 - SYMBOL_BORDER / 2), 0, Math.PI * 2);
-        ctx.stroke();
-        break;
-      case 'swell': {
-        // FontAwesome asterisk, drawn as six rounded spokes.
-        const len = Math.max(0, symbolSize / 2 - SYMBOL_BORDER);
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate((rotation * Math.PI) / 180);
-        ctx.lineCap = 'round';
-        ctx.lineWidth = Math.max(2, len * 0.42);
-        ctx.beginPath();
-        for (let i = 0; i < 3; i++) {
-          const a = (i * Math.PI) / 3 + Math.PI / 2;
-          ctx.moveTo(Math.cos(a) * len * 0.78, Math.sin(a) * len * 0.78);
-          ctx.lineTo(-Math.cos(a) * len * 0.78, -Math.sin(a) * len * 0.78);
-        }
-        ctx.stroke();
-        ctx.restore();
-        break;
-      }
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  private drawGlowSprite(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, radius: number, colour: RGB, alpha: number): void {
-    if (alpha <= 0.001) return;
-    // Quantise the cache key so animated sizes don't create a sprite per frame.
-    const key = `${colour.join(',')}|${Math.round(r / 2)}|${Math.round(radius / 2)}`;
-    let sprite = this.sprites.get(key);
-    const s = this.spriteScale;
-    const extent = r + radius;
-    if (sprite === undefined) {
-      sprite = createCanvas(extent * 2 * s, extent * 2 * s);
-      if (sprite) {
-        const c = sprite.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
-        if (c) {
-          const cx = extent * s;
-          const g = c.createRadialGradient(cx, cx, Math.max(0, (r - radius * 0.5) * s), cx, cx, extent * s);
-          g.addColorStop(0, css(colour, 0.9));
-          g.addColorStop(0.35, css(colour, 0.45));
-          g.addColorStop(0.7, css(colour, 0.12));
-          g.addColorStop(1, css(colour, 0));
-          c.fillStyle = g;
-          c.fillRect(0, 0, extent * 2 * s, extent * 2 * s);
-        }
-      }
-      this.sprites.set(key, sprite);
-    }
-    const prev = ctx.globalAlpha;
-    if (sprite) {
-      ctx.globalAlpha = alpha;
-      ctx.drawImage(sprite, x - extent, y - extent, extent * 2, extent * 2);
+    if (icon) {
+      ctx.fillStyle = '#fff';
+      // The icon is centred in the piece, which is square for hits and swells.
+      drawIcon(ctx, icon, x + w / 2, y + h / 2, ARGON_ICON_SIZE * h, 0.8, 1, rotation);
     }
     ctx.globalAlpha = prev;
   }
@@ -1174,156 +1140,129 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
     const x0 = this.xAt(roll.startTime, now);
     const length = this.algo.getLength(roll.startTime, roll.endTime, this.timeRange, this.scrollLength);
     const x1 = x0 + length;
-    if (x0 - H / 2 > this.layout.width || x1 + H / 2 < HIT_X - H) return;
+    if (x0 - H / 2 > this.layout.width || x1 + H < HIT_X - H) return;
 
+    // ArmedState.Hit / Miss: FadeOut(100)
     let alpha = 1;
     if (e.judged) alpha = 1 - clamp01((now - e.resultTime) / 100);
     if (alpha <= 0.001) return;
 
-    const colour = lerpRGB(YELLOW_DARK, YELLOW_DARKER, this.drumRollColourAt(e, now));
+    if (this.legacy?.has.drumRoll) {
+      const colour = lerpRGB(YELLOW_DARK, YELLOW_DARKER, this.drumRollColourAt(e, now));
+      this.legacy.drawDrumRoll(ctx, x0, x1, CENTRE_Y, H, colour, roll.isStrong, alpha, this.ctx.combo, roll.startTime, now);
+    } else {
+      // DrawableDrumRoll: the content starts at the start time (Content.X = DrawHeight / 2 with origin DrawHeight / 2);
+      // ArgonElongatedCirclePiece: Width = content width + DrawHeight. ArgonCirclePiece has no IHasAccentColour,
+      // so rolling hits don't change its colour; the hit flash only applies to Hits.
+      this.drawArgonCirclePiece(ctx, x0, CENTRE_Y - H / 2, length + H, H, ARGON_DRUM_ROLL, null, alpha, e.judged ? 0 : beat.flash);
+    }
 
-    if (this.legacy?.has.drumRoll) this.legacy.drawDrumRoll(ctx, x0, x1, CENTRE_Y, H, colour, roll.isStrong, alpha, this.ctx.combo, roll.startTime, now);
-    else this.drawElongatedPiece(ctx, x0, x1, H, colour, alpha, e.judged, beat);
-
-    // Ticks (TickPiece): positioned relative to the drum roll using its scroll multiplier.
-    this.drawDrumRollTicks(ctx, e, roll, x0, alpha, now);
+    this.drawDrumRollTicks(ctx, e, roll, x0, length, H, alpha, now);
   }
 
-  /** ElongatedCirclePiece: width = length + height, rounded ends. */
-  private drawElongatedPiece(ctx: CanvasRenderingContext2D, x0: number, x1: number, H: number, colour: RGB, alpha: number, judged: boolean, beat: BeatState): void {
-    ctx.globalAlpha = alpha;
-    ctx.lineCap = 'round';
-    // Glow (radius 8)
-    for (let i = 3; i >= 1; i--) {
-      ctx.strokeStyle = css(colour, (0.35 / i) * beat.glow);
-      ctx.lineWidth = H + 8 * i * 0.8;
-      ctx.beginPath();
-      ctx.moveTo(x0, CENTRE_Y);
-      ctx.lineTo(x1, CENTRE_Y);
-      ctx.stroke();
-    }
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = H;
-    ctx.beginPath();
-    ctx.moveTo(x0, CENTRE_Y);
-    ctx.lineTo(x1, CENTRE_Y);
-    ctx.stroke();
-    ctx.strokeStyle = css(colour);
-    ctx.lineWidth = H - SYMBOL_BORDER * 2;
-    ctx.stroke();
-    if (beat.flash > 0 && !judged) {
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.strokeStyle = `rgba(255,255,255,${beat.flash})`;
-      ctx.stroke();
-      ctx.globalCompositeOperation = 'source-over';
-    }
-    ctx.lineCap = 'butt';
-    ctx.globalAlpha = 1;
-  }
-
-  private drawDrumRollTicks(ctx: CanvasRenderingContext2D, e: Entry, roll: DrumRoll, x0: number, alpha: number, now: number): void {
+  /** DrawableDrumRollTick + ArgonTickPiece, positioned relative to the drum roll using its scroll multiplier. */
+  private drawDrumRollTicks(ctx: CanvasRenderingContext2D, e: Entry, roll: DrumRoll, x0: number, length: number, H: number, alpha: number, now: number): void {
     const pxPerMs = this.algo.controlPointAt(roll.startTime).multiplier * (this.scrollLength / this.timeRange);
+    const prev = ctx.globalAlpha;
     for (const n of e.nested) {
       const tick = n.obj;
       if (!(tick instanceof DrumRollTick)) continue;
       const tx = x0 + (tick.startTime - roll.startTime) * pxPerMs;
-      if (tx < HIT_X - 40 || tx > this.layout.width + 40) continue;
-      const tickSize = (tick.isStrong ? DEFAULT_STRONG_SIZE : DEFAULT_SIZE) * PF_H * 0.35;
+      if (tx < HIT_X - 80 || tx > this.layout.width + 80) continue;
+      // Size = (DEFAULT_STRONG_SIZE or DEFAULT_SIZE) relative to the tick container (length x H), FillMode.Fit.
+      const tickBox = (tick.isStrong ? DEFAULT_STRONG_SIZE : DEFAULT_SIZE) * Math.min(Math.max(0, length), H);
       let ta = alpha * this.hiddenAlpha(tick, now);
       let ts = 1;
       if (n.isHit) {
+        // ScaleTo(1.4f, 200, OutQuint); FadeOut(200, OutQuint)
         const t = clamp01((now - n.resultTime) / 200);
-        ts = 1 + 0.4 * outQuint(t);
-        ta *= 1 - outQuint(t);
+        const eased = applyEasing(Easing.OutQuint, t);
+        ts = 1 + 0.4 * eased;
+        ta *= 1 - eased;
       }
       if (ta <= 0.001) continue;
       if (this.legacy?.has.drumRollTick) {
         this.legacy.drawDrumRollTick(ctx, tx, CENTRE_Y, ts, ta);
         continue;
       }
-      ctx.globalAlpha = ta;
-      const tr = (tickSize * ts) / 2;
-      ctx.beginPath();
-      ctx.arc(tx, CENTRE_Y, Math.max(0, tr - 2.5), 0, Math.PI * 2);
-      if (tick.firstTick) {
-        ctx.fillStyle = '#fff';
-        ctx.fill();
-      }
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 5;
-      ctx.stroke();
+      // ArgonTickPiece: Size = 1 / DEFAULT_SIZE * ICON_SIZE (FillMode.Fit)
+      const size = tickBox * ARGON_TICK_SIZE * ts;
+      ctx.globalAlpha = prev * ta;
+      ctx.fillStyle = '#fff';
+      if (tick.firstTick) fillCircle(ctx, tx, CENTRE_Y, size / 2);
+      else drawIcon(ctx, FA_ANGLE_LEFT, tx, CENTRE_Y, size, 0.8, 1);
     }
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = prev;
   }
 
+  /** DrawableSwell + ArgonSwell (DefaultSwell with an ArgonSwellCirclePiece). */
   private drawSwell(ctx: CanvasRenderingContext2D, e: Entry, swell: Swell, now: number, beat: BeatState): void {
     const D = DEFAULT_SIZE * PF_H;
-    // Make the swell stop at the hit target
+    // Make the swell stop at the hit target (X = Math.Max(0, X))
     const x = Math.max(HIT_X, this.xAt(swell.startTime, now));
-    if (x - D / 2 > this.layout.width) return;
+    if (x - (D / 2) * 5 > this.layout.width) return;
 
     let alpha = 1;
     let bodyAlpha = 1;
     let bodyScale = 1;
+    let centreAlpha = 1;
     if (e.judged) {
       const t = now - e.resultTime;
       // DrawableSwell: Hit -> Delay(660).FadeOut(); Miss -> Delay(300).FadeOut()
       if (t >= (e.isHit ? 660 : 300)) alpha = 0;
-      // DefaultSwell.updateStateTransforms
-      bodyAlpha = 1 - outQuad(clamp01(t / 300));
-      bodyScale = 1 + 0.4 * clamp01(t / 300);
+      // DefaultSwell.updateStateTransforms: bodyContainer.FadeOut(300, OutQuad) + ScaleTo(1.4, 300); centreCircle.FadeOut(300, OutQuad)
+      if (t >= 0) {
+        bodyAlpha = 1 - applyEasing(Easing.OutQuad, clamp01(t / 300));
+        bodyScale = 1 + 0.4 * clamp01(t / 300);
+        centreAlpha = bodyAlpha;
+      }
     }
-    if (alpha <= 0) return;
+    if (alpha <= 0 || bodyAlpha <= 0.001) return;
 
-    // Target ring: scales to 5x from start + 100 over 400ms (OutQuint).
-    const ringT = clamp01((now - (swell.startTime + RING_APPEAR_OFFSET)) / 400);
-    const targetScale = 1 + 4 * outQuint(ringT);
+    // targetRing.Delay(ring_appear_offset).ScaleTo(target_ring_scale, 400, OutQuint) at the swell's start time.
+    const targetScale = 1 + 4 * applyEasing(Easing.OutQuint, clamp01((now - (swell.startTime + RING_APPEAR_OFFSET)) / 400));
 
+    const prev = ctx.globalAlpha;
     ctx.save();
-    ctx.globalAlpha = alpha * bodyAlpha;
+    ctx.globalAlpha = prev * alpha * bodyAlpha;
     ctx.globalCompositeOperation = 'lighter';
-    // Expanding ring (YellowLight, additive)
+    // Expanding ring (YellowLight box at inner_ring_alpha, additive)
     const ringAlpha = clamp01(e.swellRingAlpha);
-    if (ringAlpha > 0.001) {
+    if (ringAlpha > 0.001 && now >= swell.startTime) {
       ctx.fillStyle = css(YELLOW_LIGHT, 0.65 * ringAlpha);
-      ctx.beginPath();
-      ctx.arc(x, CENTRE_Y, (D / 2) * e.swellRingScale * bodyScale, 0, Math.PI * 2);
-      ctx.fill();
+      fillCircle(ctx, x, CENTRE_Y, (D / 2) * e.swellRingScale * bodyScale);
     }
-    // Target ring (thick border 1.4: YellowDark @ 0.25; thin border 1: white)
+    // Target ring: thick border (1.4, YellowDark @ 0.25) containing a thin white border (1), both additive.
     const tr = (D / 2) * targetScale * bodyScale;
-    ctx.strokeStyle = css(YELLOW_DARK, 0.25);
-    ctx.lineWidth = 1.4 * targetScale;
-    ctx.beginPath();
-    ctx.arc(x, CENTRE_Y, Math.max(0, tr - 0.7 * targetScale), 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-    ctx.lineWidth = 1 * targetScale;
-    ctx.beginPath();
-    ctx.arc(x, CENTRE_Y, Math.max(0, tr - 0.5 * targetScale), 0, Math.PI * 2);
-    ctx.stroke();
+    const k = targetScale * bodyScale;
+    ctx.fillStyle = css(YELLOW_DARK, 0.25);
+    fillPillBorder(ctx, x - tr, CENTRE_Y - tr, tr * 2, tr * 2, 1.4 * k);
+    ctx.fillStyle = '#fff';
+    fillPillBorder(ctx, x - tr, CENTRE_Y - tr, tr * 2, tr * 2, 1 * k);
     ctx.restore();
 
-    // Centre circle (SwellCirclePiece)
-    const centreAlpha = alpha * bodyAlpha;
-    if (centreAlpha > 0.001) this.drawCirclePiece(ctx, x, CENTRE_Y, D * bodyScale, YELLOW_DARK, 'swell', centreAlpha, e.judged ? 0 : beat.flash, beat.glow, e.swellRotation);
+    // Centre circle (ArgonSwellCirclePiece: Asterisk icon, rotated by DefaultSwell.Update)
+    const cd = D * bodyScale;
+    const a = alpha * bodyAlpha * centreAlpha;
+    if (a > 0.001) this.drawArgonCirclePiece(ctx, x - cd / 2, CENTRE_Y - cd / 2, cd, cd, ARGON_SWELL, FA_ASTERISK, a, e.judged ? 0 : beat.flash, e.swellRotation);
   }
 
-  private drawFlyingHits(ctx: CanvasRenderingContext2D, now: number, beat: BeatState): void {
-    const gravityTime = this.hitAnimationLength();
+  /** DrawableFlyingHit: a DrawableHit judged (and animated) when the drum roll tick was hit. */
+  private drawFlyingHits(ctx: CanvasRenderingContext2D, now: number): void {
     for (const f of this.flyingHits) {
       const t = now - f.time;
       if (t < 0 || t > 800) continue;
       const D = (f.strong ? DEFAULT_STRONG_SIZE : DEFAULT_SIZE) * PF_H;
       const x = this.xAt(f.time, now);
-      const scale = 1 - 0.2 * outQuad(clamp01(t / (gravityTime * 2)));
-      const y = CENTRE_Y + (t < gravityTime ? -200 * outQuad(t / gravityTime) : -200 + 400 * inQuad(clamp01((t - gravityTime) / (gravityTime * 2))));
-      const alpha = 1 - clamp01(t / 800);
-      if (this.legacy?.has.hitCircle) this.legacy.drawHit(ctx, x, y, D * scale, f.rim, f.strong, alpha, this.ctx.combo, f.time, now);
-      else this.drawCirclePiece(ctx, x, y, D * scale, f.rim ? COLOUR_RIM : COLOUR_CENTRE, f.rim ? 'rim' : 'centre', alpha, 0.9 * (1 - clamp01(t / 300)), beat.glow);
+      const g = this.hitGravity(t);
+      const y = CENTRE_Y + g.y;
+      const d = D * g.scale;
+      if (this.legacy?.has.hitCircle) this.legacy.drawHit(ctx, x, y, d, f.rim, f.strong, g.alpha, this.ctx.combo, f.time, now);
+      else this.drawArgonCirclePiece(ctx, x - d / 2, y - d / 2, d, d, f.rim ? ARGON_RIM : ARGON_CENTRE, FA_ANGLE_LEFT, g.alpha, 0.9 * (1 - applyEasing(Easing.OutQuint, clamp01(t / 500))));
     }
   }
 
+  /** DrawableBarLine + ArgonBarLine */
   private drawBarLines(ctx: CanvasRenderingContext2D, now: number): void {
     const bars = this.playable.barLines;
     if (bars.length === 0) return;
@@ -1337,228 +1276,230 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
       else hi = mid;
     }
     const maxAhead = this.timeRange * this.visibleAheadFactor + 100;
-    ctx.fillStyle = '#fff';
+    const prev = ctx.globalAlpha;
     for (let i = lo; i < bars.length; i++) {
       const b = bars[i];
       if (b.startTime > now + maxAhead) break;
       const x = this.xAt(b.startTime, now);
       if (x > W + 2) continue;
-      // DrawableBarLine: FadeOutFromOne(150) at StartTime
-      let alpha = b.major ? 1 : 0.75;
-      if (now > b.startTime) alpha *= 1 - clamp01((now - b.startTime) / 150);
+      // FadeOutFromOne(150) at StartTime
+      let alpha = 1;
+      if (now > b.startTime) alpha = 1 - clamp01((now - b.startTime) / 150);
       if (alpha <= 0) continue;
       if (this.legacy?.has.barLine) {
         this.legacy.drawBarLine(ctx, x, CENTRE_Y, PF_H, alpha);
         continue;
       }
-      ctx.globalAlpha = alpha;
-      ctx.fillRect(x - 1, 0, 2, PF_H);
+      // Main line: alpha 1 (major) / 0.5 (minor), tracker_width 2.
+      ctx.globalAlpha = prev * alpha * (b.major ? 1 : 0.5);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(x - BAR_LINE_WIDTH / 2, 0, BAR_LINE_WIDTH, PF_H);
       if (b.major) {
-        const size = 20;
-        const h = size * 0.866;
-        ctx.beginPath();
-        ctx.moveTo(x - size / 2, 0);
-        ctx.lineTo(x + size / 2, 0);
-        ctx.lineTo(x, h * 0.6);
-        ctx.closePath();
-        ctx.moveTo(x - size / 2, PF_H);
-        ctx.lineTo(x + size / 2, PF_H);
-        ctx.lineTo(x, PF_H - h * 0.6);
-        ctx.closePath();
-        ctx.fill();
+        // Top / bottom anchors: major_extension (10) tall additive gradients at mainLine.Alpha * 0.3.
+        ctx.globalAlpha = prev * alpha * 0.3;
+        ctx.globalCompositeOperation = 'lighter';
+        const top = ctx.createLinearGradient(0, -BAR_LINE_MAJOR_EXTENSION, 0, 0);
+        top.addColorStop(0, 'rgba(255,255,255,0)');
+        top.addColorStop(1, '#fff');
+        ctx.fillStyle = top;
+        ctx.fillRect(x - BAR_LINE_WIDTH / 2, -BAR_LINE_MAJOR_EXTENSION, BAR_LINE_WIDTH, BAR_LINE_MAJOR_EXTENSION);
+        const bottom = ctx.createLinearGradient(0, PF_H, 0, PF_H + BAR_LINE_MAJOR_EXTENSION);
+        bottom.addColorStop(0, '#fff');
+        bottom.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = bottom;
+        ctx.fillRect(x - BAR_LINE_WIDTH / 2, PF_H, BAR_LINE_WIDTH, BAR_LINE_MAJOR_EXTENSION);
+        ctx.globalCompositeOperation = 'source-over';
       }
     }
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = prev;
   }
 
-  /** TaikoHitTarget */
+  /** ArgonHitTarget (200x200, masked, centred on the hit position) */
   private drawHitTarget(ctx: CanvasRenderingContext2D): void {
-    const borderThickness = 2.5;
-    const barHeight = ((1 - DEFAULT_STRONG_SIZE) / 2) * PF_H;
-    ctx.fillStyle = '#fff';
-    ctx.globalAlpha = 0.1;
-    ctx.fillRect(HIT_X - borderThickness / 2, 0, borderThickness, barHeight);
-    ctx.fillRect(HIT_X - borderThickness / 2, PF_H - barHeight, borderThickness, barHeight);
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = borderThickness;
-    ctx.beginPath();
-    ctx.arc(HIT_X, CENTRE_Y, (DEFAULT_STRONG_SIZE * PF_H) / 2 - borderThickness / 2, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 0.5;
-    ctx.beginPath();
-    ctx.arc(HIT_X, CENTRE_Y, (DEFAULT_SIZE * PF_H) / 2 - borderThickness / 2, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-
-  /** Kiai glow behind the hit target (after LegacyKiaiGlow; the default skin has none). */
-  private drawKiaiGlow(ctx: CanvasRenderingContext2D, now: number): void {
-    if (this.kiaiGlowAlpha <= 0.001) return;
-    const bump = now - this.kiaiGlowBumpTime;
-    const scale = bump >= 0 && bump < 80 ? 1 + 0.15 * (1 - outQuad(bump / 80)) : 1;
+    const t = 4; // border_thickness
+    const barHeight = (1 - DEFAULT_STRONG_SIZE) * PF_H;
+    const prev = ctx.globalAlpha;
     ctx.save();
+    ctx.beginPath();
+    ctx.rect(HIT_X - HIT_TARGET_WIDTH / 2, 0, HIT_TARGET_WIDTH, PF_H);
+    ctx.clip();
+    ctx.fillStyle = '#fff';
+    // Bar upper (Y = -border_thickness) / bar lower (Y = +border_thickness): Circles (rounded ends)
+    ctx.beginPath();
+    roundRectPath(ctx, HIT_X - t / 2, -t, t, barHeight, t / 2);
+    roundRectPath(ctx, HIT_X - t / 2, PF_H - barHeight + t, t, barHeight, t / 2);
+    ctx.fill();
+    // Outer / inner circles: white, additive, alpha 0.1
     ctx.globalCompositeOperation = 'lighter';
-    this.drawGlowSprite(ctx, HIT_X, CENTRE_Y, 30 * scale, 70 * scale, KIAI_GLOW_COLOUR, this.kiaiGlowAlpha * 0.6);
+    ctx.globalAlpha = prev * 0.1;
+    fillCircle(ctx, HIT_X, CENTRE_Y, (DEFAULT_SIZE * PF_H) / 2);
+    fillCircle(ctx, HIT_X, CENTRE_Y, (DEFAULT_SIZE * 0.85 * PF_H) / 2);
     ctx.restore();
+    ctx.globalAlpha = prev;
   }
 
-  /** DefaultHitExplosion */
+  /** HitExplosion (DEFAULT_SIZE, centred on the hit target) + ArgonHitExplosion */
   private drawExplosions(ctx: CanvasRenderingContext2D, now: number): void {
     if (this.explosions.length === 0) return;
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
+    const D = DEFAULT_SIZE * PF_H;
+    const prev = ctx.globalAlpha;
     for (const ex of this.explosions) {
       const t = now - ex.time;
-      if (t < 0 || t > 1000) continue;
-      const alpha = 0.15 * (1 - clamp01(t / 500));
-      if (alpha <= 0) continue;
-      let size = DEFAULT_SIZE * PF_H * (1 + 2 * outQuint(t / 1000));
-      if (ex.secondHitTime !== null && now >= ex.secondHitTime) size *= 1 + (STRONG_SCALE - 1) * clamp01((now - ex.secondHitTime) / 50);
-      ctx.globalAlpha = alpha;
-      ctx.beginPath();
-      ctx.arc(HIT_X, CENTRE_Y, size / 2, 0, Math.PI * 2);
-      if (isHit(ex.result)) {
-        ctx.fillStyle = css(ex.rim ? BLUE_DARKER : PINK_DARKER);
-        ctx.fill();
-      }
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
+      if (t < 0) continue;
+      let alpha: number;
+      if (ex.result === HitResult.Great) {
+        // FadeIn(30, In).Then().FadeOut(450, OutQuint)
+        alpha = t < 30 ? applyEasing(Easing.In, t / 30) : 1 - applyEasing(Easing.OutQuint, clamp01((t - 30) / 450));
+      } else if (ex.result === HitResult.Ok) {
+        // FadeTo(0.2f, 30, In).Then().FadeOut(200, OutQuint)
+        alpha = t < 30 ? 0.2 * applyEasing(Easing.In, t / 30) : 0.2 * (1 - applyEasing(Easing.OutQuint, clamp01((t - 30) / 200)));
+      } else alpha = 0; // Miss: FadeOut()
+      if (alpha <= 0.001) continue;
 
-  /** DefaultKiaiHitExplosion */
-  private drawKiaiExplosions(ctx: CanvasRenderingContext2D, now: number): void {
-    if (this.kiaiExplosions.length === 0) return;
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    for (const k of this.kiaiExplosions) {
-      const t = now - k.time;
-      if (t < 0 || t > 500) continue;
-      const alpha = 0.25 * (1 - clamp01(t / 250));
-      if (alpha <= 0) continue;
-      const w = DEFAULT_SIZE * PF_H;
-      const h = PF_H * (1 + 2 * outQuint(t / 500));
-      const colour = k.rim ? BLUE_DARKER : PINK_DARKER;
-      const g = ctx.createRadialGradient(HIT_X, CENTRE_Y, 0, HIT_X, CENTRE_Y, w / 2 + 60);
-      g.addColorStop(0, css(colour, 1));
-      g.addColorStop(0.5, css(colour, 0.6));
-      g.addColorStop(1, css(colour, 0));
-      ctx.globalAlpha = alpha;
+      // AnimateSecondHit: outer.ResizeTo(STRONG_SCALE, 500, OutQuint)
+      let outerScale = 1;
+      if (ex.secondHitTime !== null && now >= ex.secondHitTime) outerScale = 1 + (STRONG_SCALE - 1) * applyEasing(Easing.OutQuint, clamp01((now - ex.secondHitTime) / 500));
+
+      const gradient = ex.rim ? RIM_HIT_GRADIENT : CENTRE_HIT_GRADIENT;
+      const glow = ex.rim ? RIM_HIT_GLOW : CENTRE_HIT_GLOW;
+      ctx.globalAlpha = prev * alpha;
+      const ro = (D * outerScale) / 2;
+      const g = ctx.createLinearGradient(HIT_X - ro, 0, HIT_X + ro, 0);
+      g.addColorStop(0, css(gradient[0]));
+      g.addColorStop(1, css(gradient[1]));
       ctx.fillStyle = g;
-      ctx.save();
-      ctx.translate(HIT_X, CENTRE_Y);
-      ctx.scale(1, h / (w + 120));
-      ctx.translate(-HIT_X, -CENTRE_Y);
-      ctx.beginPath();
-      ctx.arc(HIT_X, CENTRE_Y, w / 2 + 60, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
+      fillCircle(ctx, HIT_X, CENTRE_Y, ro);
+      const ri = (D * 0.85) / 2;
+      drawCircleGlow(ctx, HIT_X, CENTRE_Y, ri, 45, glow, 0.5);
+      ctx.fillStyle = '#fff';
+      fillCircle(ctx, HIT_X, CENTRE_Y, ri);
     }
-    ctx.restore();
+    ctx.globalAlpha = prev;
   }
 
-  /** DrawableTaikoJudgement + taiko DefaultJudgementPiece animations */
+  /** DrawableTaikoJudgement (200x200 centred on the hit target) + taiko ArgonJudgementPiece */
   private drawJudgements(ctx: CanvasRenderingContext2D, now: number): void {
     if (this.judgements.length === 0) return;
+    const duration = 800;
+    const prev = ctx.globalAlpha;
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = 'bold 20px sans-serif';
+    ctx.font = `400 20px ${FONT}`;
     for (const j of this.judgements) {
       const t = now - j.time;
-      if (t < 0 || t > 800) continue;
+      if (t < 0 || t > 1000) continue;
       const text = RESULT_TEXT[j.result];
       if (!text) continue;
-      ctx.fillStyle = RESULT_COLOURS[j.result] ?? '#fff';
+      const colour = RESULT_COLOURS[j.result] ?? WHITE;
+      // this.FadeOutFromOne(duration, OutQuint)
+      const pieceAlpha = 1 - applyEasing(Easing.OutQuint, clamp01(t / duration));
+      if (pieceAlpha <= 0.001) continue;
       ctx.save();
+      ctx.translate(HIT_X, CENTRE_Y);
+      let textY: number;
+      let textScale = 1;
       if (j.result !== HitResult.Miss) {
-        ctx.globalAlpha = 1 - outQuint(t / 800);
-        const y = CENTRE_Y + PF_H * (-0.6 - 0.9 * clamp01(t / 500));
-        const scale = 0.9 + 0.1 * outElastic(clamp01(t / 500));
-        ctx.translate(HIT_X, y);
-        ctx.scale(0.85 * scale, scale);
+        // JudgementText.MoveToY(-0.6f).MoveToY(-1.0f, duration, OutQuint) (relative to the 200 tall piece); ScaleTo(1.4f, duration, OutQuint)
+        const e = applyEasing(Easing.OutQuint, clamp01(t / duration));
+        textY = (-0.6 - 0.4 * e) * PF_H;
+        textScale = 1 + 0.4 * e;
       } else {
-        // DefaultJudgementPiece.PlayAnimation (miss)
-        ctx.globalAlpha = 1 - clamp01(t / 800);
-        const scale = 1.6 - 0.6 * inQuad(clamp01(t / 100));
-        const y = CENTRE_Y + Math.min(PF_H * 2, 100 * PF_H * inQuint(clamp01(t / 800)));
-        ctx.translate(HIT_X, y);
-        ctx.rotate(((40 * inQuint(clamp01(t / 800))) * Math.PI) / 180);
-        ctx.scale(0.85 * scale, scale);
+        // this.ScaleTo(1.6f).ScaleTo(1, 100, In); JudgementText.MoveToOffset((0, 100), duration, InQuint) (relative); this.RotateTo(40, duration, InQuint)
+        const s = 1.6 - 0.6 * applyEasing(Easing.In, clamp01(t / 100));
+        const e = applyEasing(Easing.InQuint, clamp01(t / duration));
+        ctx.rotate((40 * e * Math.PI) / 180);
+        ctx.scale(s, s);
+        textY = 100 * PF_H * e;
       }
-      ctx.fillText(text, 0, 0);
+      ctx.globalAlpha = prev * pieceAlpha;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = css(colour);
+      ctx.save();
+      ctx.translate(0, textY);
+      ctx.scale(textScale, textScale);
+      drawSpacedText(ctx, text, 0, 0, 10);
+      ctx.restore();
+
+      // RingExplosion (hits only): rings moving out from 0.6 to 1 of a random distance (600, OutQuint), FadeOutFromOne(1000, OutQuint)
+      if (j.result !== HitResult.Miss) {
+        const ringAlpha = 1 - applyEasing(Easing.OutQuint, clamp01(t / 1000));
+        if (ringAlpha > 0.001) {
+          ctx.globalAlpha = prev * pieceAlpha * ringAlpha;
+          ctx.fillStyle = css(colour);
+          const travel = j.result === HitResult.Great ? 58 : 58 * 0.6;
+          const countSmall = 4;
+          const countLarge = j.result === HitResult.Great ? 4 : 0;
+          const rnd = seededRandom(j.seed);
+          const move = applyEasing(Easing.OutQuint, clamp01(t / 600));
+          for (let i = 0; i < countSmall + countLarge; i++) {
+            const size = i < countSmall ? 9 : 14;
+            // RNG.NextSingle(0, 360) is passed straight to MathF.Cos / MathF.Sin.
+            const direction = rnd() * 360;
+            const distance = travel / 2 + rnd() * (travel / 2);
+            const d = distance * (0.6 + 0.4 * move);
+            const rx = Math.cos(direction) * d;
+            const ry = Math.sin(direction) * d;
+            fillPillBorder(ctx, rx - size / 2, ry - size / 2, size, size, 4);
+          }
+        }
+      }
       ctx.restore();
     }
     ctx.restore();
+    ctx.globalAlpha = prev;
   }
 
-  /** DefaultInputDrum (procedural) + combo display. */
+  /** InputDrum (180 x 200) + ArgonInputDrum (AspectContainer 180 x 180, centred; contents scaled 0.9) */
   private drawInputDrum(ctx: CanvasRenderingContext2D, now: number): void {
     const cx = INPUT_DRUM_WIDTH / 2;
     const cy = CENTRE_Y;
-    const R = (INPUT_DRUM_WIDTH * 0.9) / 2;
-    const split = (INPUT_DRUM_WIDTH * 0.9 * 0.025) / 2;
-    const inner = R * 0.7;
+    const size = INPUT_DRUM_WIDTH * 0.9;
+    const R = size / 2;
+    const prev = ctx.globalAlpha;
 
     const half = (left: boolean, rimAction: TaikoAction, centreAction: TaikoAction): void => {
-      const ox = left ? cx - split : cx + split;
-      const a0 = left ? Math.PI / 2 : -Math.PI / 2;
-      const a1 = left ? (Math.PI * 3) / 2 : Math.PI / 2;
+      ctx.save();
+      // TaikoHalfDrum: Masking, width = drum size, height = 2 * drum size, anchored at the drum centre.
+      ctx.beginPath();
+      ctx.rect(left ? cx - size : cx, cy - size, size, size * 2);
+      ctx.clip();
+      ctx.fillStyle = css(GRAY_51);
+      fillCircle(ctx, cx, cy, R);
       const rimAlpha = this.drumOverlayAlpha(rimAction, now);
-      const centreAlpha = this.drumOverlayAlpha(centreAction, now);
-      const rimScale = 1 - 0.05 * (rimAlpha > 0 ? Math.min(1, rimAlpha * 2) : 0);
-      const centreScale = 1 - 0.05 * (centreAlpha > 0 ? Math.min(1, centreAlpha * 2) : 0);
-
-      // Rim (outer)
-      ctx.fillStyle = '#d9d9d9';
-      ctx.beginPath();
-      ctx.moveTo(ox, cy);
-      ctx.arc(ox, cy, R * rimScale, a0, a1);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = '#2a2a2a';
-      ctx.beginPath();
-      ctx.moveTo(ox, cy);
-      ctx.arc(ox, cy, R * rimScale - 7, a0, a1);
-      ctx.closePath();
-      ctx.fill();
       if (rimAlpha > 0.001) {
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = rimAlpha;
-        ctx.fillStyle = css(BLUE);
-        ctx.beginPath();
-        ctx.arc(ox, cy, R * rimScale, a0, a1);
-        ctx.arc(ox, cy, inner * centreScale + 4, a1, a0, true);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
+        ctx.globalAlpha = prev * rimAlpha;
+        drawCircleGlow(ctx, cx, cy, R, 50, RIM_HIT_GLOW, 0.66);
+        ctx.fillStyle = horizontalGradient(ctx, cx - R, cx + R, RIM_HIT_GRADIENT);
+        fillCircle(ctx, cx, cy, R);
+        ctx.globalAlpha = prev;
       }
-      // Centre (inner)
-      ctx.fillStyle = '#f2ece4';
-      ctx.beginPath();
-      ctx.moveTo(ox, cy);
-      ctx.arc(ox, cy, inner * centreScale, a0, a1);
-      ctx.closePath();
-      ctx.fill();
+      ctx.fillStyle = css(GRAY_64);
+      fillCircle(ctx, cx, cy, R * (1 - RIM_SIZE));
+      const centreAlpha = this.drumOverlayAlpha(centreAction, now);
       if (centreAlpha > 0.001) {
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = centreAlpha;
-        ctx.fillStyle = css(PINK);
-        ctx.beginPath();
-        ctx.moveTo(ox, cy);
-        ctx.arc(ox, cy, inner * centreScale, a0, a1);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
+        ctx.globalAlpha = prev * centreAlpha;
+        const rc = R * (1 - RIM_SIZE);
+        drawCircleGlow(ctx, cx, cy, rc, 50, CENTRE_HIT_GLOW, 1);
+        ctx.fillStyle = horizontalGradient(ctx, cx - rc, cx + rc, CENTRE_HIT_GRADIENT);
+        fillCircle(ctx, cx, cy, rc);
+        ctx.globalAlpha = prev;
       }
+      ctx.restore();
     };
     half(true, 'LeftRim', 'LeftCentre');
     half(false, 'RightRim', 'RightCentre');
-    this.drawDrumCombo(ctx);
+
+    // Middle split (masked by the drum circle)
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.fillStyle = css(GRAY_38);
+    ctx.fillRect(cx - (MIDDLE_SPLIT * 0.9) / 2, cy - R, MIDDLE_SPLIT * 0.9, size);
+    ctx.fillStyle = css(GRAY_48);
+    ctx.fillRect(cx - (MIDDLE_SPLIT * 0.9) / 2, cy - R * (1 - RIM_SIZE), MIDDLE_SPLIT * 0.9, size * (1 - RIM_SIZE));
+    ctx.restore();
   }
 
   /** Combo display on the drum. */
@@ -1641,30 +1582,27 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
     ctx.restore();
   }
 
-  /** BeatSyncedContainer state used by CirclePiece kiai effects. */
+  /**
+   * BeatSyncedContainer (EarlyActivationMilliseconds = pre_beat_transition_time, MinimumBeatLength 50) driving
+   * ArgonCirclePiece.OnNewBeat: in kiai, flash.FadeTo(kiai_flash_opacity).Then().FadeOut(beatLength * 0.75, OutSine).
+   */
   private beatState(now: number): BeatState {
-    const out: BeatState = { flash: 0, glow: 1 };
+    const out: BeatState = { flash: 0 };
     if (!this.kiaiTimes) return out;
     const cp = this.playable.controlPoints;
     const t = now + PRE_BEAT_TRANSITION_TIME;
     const tp = cp.timingPointAt(t);
-    const bl = tp.beatLength;
+    let bl = tp.beatLength;
+    if (!(bl > 0)) return out;
+    while (bl < 50) bl *= 2;
     const beatIndex = Math.floor((t - tp.time) / bl);
     const beatStart = tp.time + beatIndex * bl;
     if (!cp.effectPointAt(beatStart).kiaiMode) return out;
-    // flashBox.FadeTo(kiai_flash_opacity).Then().FadeOut(beatLength * 0.75, OutSine)
-    out.flash = KIAI_FLASH_OPACITY * (1 - outSine(clamp01((t - beatStart) / (bl * 0.75))));
-    // Bar starts: FadeEdgeEffectTo(1, 80, OutQuint).Then().FadeEdgeEffectTo(edge_alpha_kiai, beatLength * 2, OutQuint)
-    const sig = Math.max(1, tp.timeSignature);
-    const barIndex = Math.floor(beatIndex / sig) * sig;
-    const e = t - (tp.time + barIndex * bl);
-    out.glow = e < PRE_BEAT_TRANSITION_TIME ? 0.5 + 0.5 * outQuint(e / PRE_BEAT_TRANSITION_TIME) : 1 - 0.5 * outQuint(clamp01((e - PRE_BEAT_TRANSITION_TIME) / (bl * 2)));
+    out.flash = KIAI_FLASH_OPACITY * (1 - applyEasing(Easing.OutSine, clamp01((t - beatStart) / (tp.beatLength * 0.75))));
     return out;
   }
 
-  dispose(): void {
-    this.sprites.clear();
-  }
+  dispose(): void {}
 
   /** Exposed for tests: the judged result of every top-level object. */
   get resultsForTesting(): HitResult[] {
@@ -1674,7 +1612,6 @@ export class DrawableTaikoRuleset implements DrawableRuleset {
 
 interface BeatState {
   flash: number;
-  glow: number;
 }
 
 function pruneBefore<T extends { time: number }>(list: T[], time: number): void {

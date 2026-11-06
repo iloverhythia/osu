@@ -252,9 +252,8 @@ export function tryUpdateCriteriaRangeFloat(range: OptionalRange, op: Operator, 
       return false;
 
     case Operator.NotEqual:
-      range.invertRange = true;
-    // fallthrough
     case Operator.Equal:
+      if (op === Operator.NotEqual) range.invertRange = true;
       range.min = f(value - tol);
       range.max = f(value + tol);
       if (tol === 0) range.isLowerInclusive = range.isUpperInclusive = true;
@@ -294,9 +293,8 @@ function updateDoubleRange(range: OptionalRange, op: Operator, value: number, to
       return false;
 
     case Operator.NotEqual:
-      range.invertRange = true;
-    // fallthrough
     case Operator.Equal:
+      if (op === Operator.NotEqual) range.invertRange = true;
       range.min = value - tolerance;
       range.max = value + tolerance;
       if (tolerance === 0) range.isLowerInclusive = range.isUpperInclusive = true;
@@ -401,9 +399,8 @@ function updateGenericRange(range: OptionalRange, op: Operator, value: number): 
       return false;
 
     case Operator.NotEqual:
-      range.invertRange = true;
-    // fallthrough
     case Operator.Equal:
+      if (op === Operator.NotEqual) range.invertRange = true;
       range.isLowerInclusive = range.isUpperInclusive = true;
       range.min = value;
       range.max = value;

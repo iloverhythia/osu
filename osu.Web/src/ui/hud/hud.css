@@ -1,0 +1,689 @@
+/* Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence. */
+/* Styles for the gameplay overlays in src/ui/hud (ports of lazer's SkipOverlay, GameplayMenuOverlay, HoldForMenuButton, */
+/* HotkeyRetry/ExitOverlay, OsuResumeOverlay and PlayerLoader / BeatmapMetadataDisplay). Fonts: "Exo 2" substitutes Torus. */
+
+.player {
+  --ease-out-quint: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
+}
+
+/* ---------------- SkipOverlay: full-width 100px strip centred at 70% height */
+.skip-overlay {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  top: calc(70% - 50px);
+  height: 100px;
+  z-index: 6;
+}
+
+.skip-container {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 300ms linear;
+}
+
+.skip-container.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.skip-fading {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 1000ms var(--ease-out-expo);
+}
+
+.skip-fading.visible {
+  opacity: 1;
+  transition: opacity 500ms var(--ease-out-expo);
+}
+
+.skip-btn {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  color: #fff;
+  font: inherit;
+}
+
+.skip-btn:disabled {
+  cursor: default;
+}
+
+.skip-bg {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0.2;
+  transition: opacity 500ms var(--ease-out-quint);
+}
+
+.skip-btn.hover .skip-bg {
+  opacity: 0.4;
+}
+
+.skip-aspect {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 60px;
+  height: 60px;
+  margin: -30px 0 0 -30px;
+  border-radius: 15px;
+  overflow: hidden;
+  transition: transform 1000ms cubic-bezier(0.34, 1.8, 0.64, 1);
+}
+
+.skip-btn.down .skip-aspect {
+  transform: scale(0.75);
+  transition: transform 2000ms var(--ease-out-quint);
+}
+
+.skip-btn.flash .skip-aspect {
+  transform: scale(1.2);
+  transition: transform 2000ms var(--ease-out-quint);
+}
+
+.skip-box {
+  position: absolute;
+  inset: 0;
+  /* Orange3 with the TrianglesV2 gradient (Orange3.Lighten(0.2) → Orange3) approximated as a plain gradient */
+  background: linear-gradient(#d9b84d, #cca633);
+  transition: filter 500ms var(--ease-out-quint);
+}
+
+.skip-btn.hover .skip-box {
+  filter: brightness(1.12);
+}
+
+.skip-btn.flash .skip-box {
+  animation: skip-flash 500ms var(--ease-out-quint);
+}
+
+@keyframes skip-flash {
+  from {
+    filter: brightness(3);
+  }
+}
+
+.skip-chevrons {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 0;
+  transition: gap 500ms var(--ease-out-quint);
+}
+
+.skip-btn.hover .skip-chevrons {
+  gap: 5px;
+}
+
+.skip-chevrons i {
+  width: 15px;
+  height: 15px;
+  background: #fff;
+  clip-path: polygon(20% 8%, 42% 0, 82% 50%, 42% 100%, 20% 92%, 52% 50%);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
+}
+
+.skip-text {
+  position: absolute;
+  left: 50%;
+  top: 70%;
+  transform: translate(-50%, -50%);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.skip-remaining {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  height: 5px;
+  border-radius: 2.5px;
+  background: #cca633;
+  transform: translateX(-50%);
+}
+
+/* ---------------- HotkeyRetryOverlay / HotkeyExitOverlay */
+.hold-confirm-overlay {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 60;
+}
+
+/* ---------------- HoldForMenuButton (BottomRightElements margin 10 + button margin 10) */
+.hold-for-menu {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  z-index: 7;
+}
+
+.hfm-text {
+  font-weight: 700;
+  font-size: 20px;
+  opacity: 0;
+}
+
+.hfm-circle {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: rgba(17, 17, 17, 0.5);
+  touch-action: none;
+}
+
+.hfm-progress {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+
+.hfm-overlay {
+  position: absolute;
+  inset: 5%;
+  border-radius: 50%;
+  background: #111;
+}
+
+.hfm-icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* ---------------- GameplayMenuOverlay */
+.gameplay-menu {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms cubic-bezier(0.42, 0, 1, 1);
+}
+
+.gameplay-menu.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.gm-bg {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0.75;
+}
+
+.gm-grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: 1fr auto 1fr auto;
+}
+
+.gm-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  font-weight: 600;
+  letter-spacing: 5px;
+  color: #ffcc22;
+}
+
+.gm-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 50px;
+  overflow: hidden;
+}
+
+.gm-button {
+  --gm-w: 0.8;
+  position: relative;
+  height: 80px;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.gm-glow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: calc(80% * 1.08);
+  transform: translateX(-50%) skewX(-11.31deg);
+  opacity: 0;
+  display: flex;
+  transition:
+    width 400ms var(--ease-out-quint),
+    opacity 200ms var(--ease-out-quint);
+}
+
+.gm-glow i {
+  height: 100%;
+}
+
+.gm-glow .l {
+  width: 12.5%;
+  background: linear-gradient(to right, var(--gm-colour-0), var(--gm-colour));
+}
+
+.gm-glow .c {
+  width: 75%;
+  background: var(--gm-colour);
+}
+
+.gm-glow .r {
+  width: 12.5%;
+  background: linear-gradient(to right, var(--gm-colour), var(--gm-colour-0));
+}
+
+.gm-colour {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 80%;
+  border-radius: 5px;
+  transform: translateX(-50%) skewX(-11.31deg);
+  background: var(--gm-colour);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.05);
+  transition: width 200ms var(--ease-out-quint);
+}
+
+.gm-text {
+  position: relative;
+  display: inline-block;
+  font-size: 28px;
+  font-weight: 700;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.1);
+  transition:
+    letter-spacing 200ms var(--ease-out-quint),
+    transform 200ms var(--ease-out-quint);
+}
+
+.gm-button.selected .gm-colour {
+  width: 90%;
+  transition: width 400ms var(--ease-out-quint);
+}
+
+.gm-button.selected .gm-glow {
+  width: calc(90% * 1.08);
+  opacity: 1;
+  transition:
+    width 400ms var(--ease-out-quint),
+    opacity 400ms var(--ease-out-quint);
+}
+
+.gm-button.selected .gm-text {
+  letter-spacing: 1.4px;
+  transform: scale(1.02);
+  transition:
+    letter-spacing 400ms var(--ease-out-quint),
+    transform 400ms var(--ease-out-quint);
+}
+
+.gm-button:active .gm-colour {
+  width: 88.2%;
+  transition: width 800ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.gm-button.clicked .gm-colour {
+  animation: gm-click 100ms var(--ease-out-quint);
+}
+
+@keyframes gm-click {
+  50% {
+    filter: brightness(1.15);
+  }
+}
+
+.gm-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  text-align: center;
+}
+
+.gm-info b {
+  font-weight: 700;
+}
+
+/* ---------------- ResumeOverlay / OsuResumeOverlay */
+.resume-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 500ms var(--ease-out-quint);
+}
+
+.resume-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.resume-message {
+  position: absolute;
+  top: 40%;
+  width: 100%;
+  text-align: center;
+  font-size: 30px;
+  letter-spacing: 5px;
+  color: #ffcc22;
+  text-shadow: 0 2px 2px rgba(0, 0, 0, 0.25);
+}
+
+.resume-cursor {
+  position: absolute;
+  width: 54px;
+  height: 54px;
+  margin: -27px 0 0 -27px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.resume-cursor-inner {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 6px solid #ffa500;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.25) inset;
+  transition: border-color 400ms var(--ease-out-quint);
+}
+
+.resume-cursor.hover .resume-cursor-inner {
+  border-color: #fff;
+}
+
+.resume-cursor-inner.appear {
+  animation: resume-cursor-appear 1000ms var(--ease-out-quint);
+}
+
+.resume-cursor-inner.resume {
+  transform: scale(2);
+  transition: transform 500ms var(--ease-out-quint);
+}
+
+@keyframes resume-cursor-appear {
+  from {
+    transform: scale(4);
+  }
+}
+
+/* ---------------- PlayerLoader */
+.player-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  overflow: hidden;
+}
+
+.pl-black {
+  position: absolute;
+  inset: 0;
+  background: #000;
+}
+
+.pl-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pl-metadata {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: 90vw;
+}
+
+.pl-logo {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 32%, #c77dff, #9b30ff 48%, #5a189a 100%);
+  box-shadow: 0 0 0 4px #fff inset;
+}
+
+.pl-logo span {
+  font-weight: 800;
+  font-style: italic;
+  font-size: 16px;
+}
+
+.pl-title {
+  margin-top: 15px;
+  font-size: 36px;
+  font-style: italic;
+  line-height: 1.2;
+}
+
+.pl-artist {
+  font-size: 26px;
+  font-style: italic;
+  line-height: 1.2;
+}
+
+.pl-thumb {
+  position: relative;
+  width: 300px;
+  height: 60px;
+  margin: 10px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #222;
+}
+
+.pl-thumb-img {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+}
+
+.pl-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transition: opacity 200ms var(--ease-out-quint);
+}
+
+.pl-loading.visible {
+  opacity: 1;
+}
+
+.pl-spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pl-spinner-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #fff;
+  animation: pl-spin 1s linear infinite;
+}
+
+@keyframes pl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pl-version {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 40px;
+  font-size: 26px;
+  font-style: italic;
+}
+
+.pl-stars {
+  font-size: 14px;
+  font-style: normal;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 10px;
+  animation: pl-fade-in-quint 300ms cubic-bezier(0.64, 0, 0.78, 0);
+}
+
+@keyframes pl-fade-in-quint {
+  from {
+    opacity: 0;
+  }
+}
+
+.pl-lines {
+  display: grid;
+  grid-template-columns: auto auto;
+  font-size: 20px;
+}
+
+.pl-label {
+  text-align: right;
+  margin-right: 5px;
+  color: #ccc;
+}
+
+.pl-value {
+  text-align: left;
+  margin-left: 5px;
+}
+
+.pl-mods {
+  margin-top: 20px;
+  display: flex;
+  gap: 5px;
+}
+
+.pl-mod {
+  width: 48px;
+  height: 33px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mod-colour);
+  clip-path: polygon(0 50%, 22% 0, 78% 0, 100% 50%, 78% 100%, 22% 100%);
+}
+
+.pl-mod span {
+  font-weight: 900;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.9);
+}
+
+.pl-watching {
+  margin-top: 16px;
+  font-size: 16px;
+  color: #99ddff;
+}
+
+.pl-disclaimers {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(270px + 50px);
+  max-width: 100%;
+  padding: 25px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.pl-disclaimer {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 5px;
+  background: rgba(46, 41, 56, 0.1);
+  transition: background 500ms var(--ease-out-quint);
+}
+
+.pl-disclaimer:hover {
+  background: rgb(46, 41, 56);
+}
+
+.pl-disclaimer-bar {
+  flex: none;
+  width: 7px;
+  height: 15px;
+  margin-top: 2px;
+  border-radius: 4px;
+  background: #ffd966;
+}
+
+.pl-disclaimer-title {
+  font-weight: 700;
+  font-size: 17px;
+  margin-bottom: 2px;
+}
+
+.pl-disclaimer-text {
+  font-size: 16px;
+}
+
+/* Replay / autoplay label (approximation of ReplayPlayer's message) */
+.player-replay-label {
+  position: absolute;
+  top: 96px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  pointer-events: none;
+  z-index: 5;
+}

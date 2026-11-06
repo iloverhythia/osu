@@ -1,0 +1,255 @@
+/* Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence. */
+/* Main menu (MainMenu / ButtonSystem / MainMenuButton / SongTicker / MenuTipDisplay / intro). */
+
+.main-menu {
+  overflow: hidden;
+  animation: none;
+}
+
+.menu-scale {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+
+.menu-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Additive blending onto the background (BlendingParameters.Additive). */
+.menu-canvas.additive {
+  mix-blend-mode: plus-lighter;
+}
+
+/* ---------- ButtonSystem / ButtonArea ---------- */
+.button-system {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform-origin: 50% 50%;
+}
+
+.button-area {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 100px;
+  margin-top: -50px;
+}
+
+.button-area-bg {
+  position: absolute;
+  top: 0;
+  left: -50%;
+  width: 200%;
+  height: 100%;
+  background: rgb(50, 50, 50);
+  transform-origin: 50% 50%;
+}
+
+.button-area-flow {
+  position: absolute;
+  inset: 0;
+}
+
+/* MainMenuButton: background sheared by WEDGE_WIDTH / height (osu-framework shears by -Shear: tan = 0.2). */
+.mmb {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100px;
+  color: #fff;
+}
+
+.mmb-bg {
+  position: absolute;
+  inset: 0;
+  transform: skewX(-11.3099deg);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.2);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.mmb-hover {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+  mix-blend-mode: plus-lighter;
+}
+
+.mmb-content {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.mmb-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.mmb-icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.2));
+}
+
+.mmb-icon svg {
+  display: block;
+}
+
+.mmb-text {
+  position: absolute;
+  left: 50%;
+  bottom: 7px;
+  transform: translateX(-50%);
+  margin-left: -3px;
+  font-size: 16px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+  line-height: 1;
+}
+
+/* ---------- OsuLogo hit area ---------- */
+.main-menu .logo {
+  position: absolute;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---------- SongTicker ---------- */
+.song-ticker {
+  position: absolute;
+  top: 5px;
+  right: 15px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  pointer-events: none;
+  opacity: 0;
+  max-width: 70%;
+}
+
+.song-ticker::before {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 999px;
+  box-shadow: 0 0 75px rgba(10, 10, 10, 0.3);
+  z-index: -1;
+}
+
+.song-ticker-title {
+  font-size: 24px;
+  font-weight: 300;
+  font-style: italic;
+  line-height: 1.1;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.song-ticker-artist {
+  font-size: 16px;
+  line-height: 1.1;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+  white-space: nowrap;
+}
+
+/* ---------- MenuTipDisplay ---------- */
+.menu-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.menu-tip {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 620px;
+  max-width: calc(100% - 32px);
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(23, 26, 28, 0.75);
+  text-align: center;
+  font-size: 16px;
+  line-height: 1.25;
+  transform-origin: 50% 100%;
+}
+
+.menu-tip-header {
+  color: #ff99c7;
+  font-weight: 600;
+}
+
+.menu-tip-icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  vertical-align: -2px;
+}
+
+.menu-tip-text {
+  margin-top: 2px;
+}
+
+/* ---------- misc ---------- */
+.menu-attribution {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  max-width: min(440px, 45%);
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+}
+
+.menu-game-flash {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  mix-blend-mode: plus-lighter;
+  pointer-events: none;
+}
+
+.intro-gate {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.intro-gate-hint {
+  color: var(--fg-dim);
+  font-size: 18px;
+  animation: pulse 1.6s ease-in-out infinite;
+}
