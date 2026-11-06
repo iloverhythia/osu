@@ -257,6 +257,9 @@ export class SongSelectScreen extends Screen {
     this.onResize();
     this.arrive();
     this.updateFooterMods();
+    const w = this.game.working;
+    this.lastWorkingKey = w ? `${w.set.id}|${w.entry.hash}` : '';
+    this.updateVariousState();
     this.lastFrame = performance.now();
     this.raf = requestAnimationFrame(this.frame);
     if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => this.filterControl.search.focus({ preventScroll: true }), 50);

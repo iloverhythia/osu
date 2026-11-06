@@ -148,7 +148,14 @@ export function openSettings(game: Game): void {
 
     h('h3', null, 'Gameplay'),
     slider('Background dim', 'gameplay.backgroundDim', 0, 1, 0.01, pct),
-    toggle('Show HUD', 'gameplay.showHud'),
+    choice('HUD visibility', 'gameplay.hudVisibilityMode', [
+      ['always', 'Always'],
+      ['hideDuringGameplay', 'Hide during gameplay'],
+      ['never', 'Never'],
+    ]),
+    toggle('Show health display even when you can\'t fail', 'gameplay.showHealthDisplayWhenCantFail'),
+    toggle('Star fountains', 'gameplay.starFountains'),
+    slider('Hold-to-confirm activation time', 'ui.holdActivationDelay', 0, 500, 50, v => `${v}ms`),
     toggle('Hit error meter', 'gameplay.hitErrorMeter'),
     toggle('Key overlay', 'gameplay.showKeyCounter'),
     toggle('Lighten during breaks', 'gameplay.lightenDuringBreaks'),
