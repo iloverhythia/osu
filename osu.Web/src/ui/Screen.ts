@@ -7,6 +7,19 @@ export abstract class Screen {
   /** Background dim while this screen is shown (0..1). */
   backgroundDim = 0.5;
   /** Background blur in px (BackgroundScreenBeatmap.BlurAmount). */
+  /** Canvases making up the screen, bottom to top, for F12 screenshots (null when the screen isn't canvas-drawn). */
+  screenshotLayers?(): HTMLCanvasElement[];
+
+  /** Whether the mouse wheel adjusts the volume over this screen (ScrollAdjustsVolume). */
+  get scrollAdjustsVolume(): boolean {
+    return false;
+  }
+
+  /** Whether unhandled wheel events are swallowed (GameplayScrollWheelHandling with MouseDisableWheel). */
+  get blocksWheel(): boolean {
+    return false;
+  }
+
   /** IOsuScreen.BackgroundParallaxAmount */
   get backgroundParallaxAmount(): number {
     return 1;

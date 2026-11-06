@@ -187,6 +187,13 @@ function skinSection(game: Game): SectionDef {
 
 // ------------------------------------------------------------------ all sections
 
+/** MouseSettings: the sensitivity slider only applies (and is only enabled) in high precision mode. */
+function sensitivityItem(): SettingsItem {
+  const b = bindSetting<number>('input.sensitivity');
+  b.disabled = () => !settings.get('input.highPrecision', false);
+  return settingsItem(formSliderBar('Cursor sensitivity', b, { min: 0.1, max: 6, precision: 0.01, keyboardStep: 0.01, labelFormat: v => `${v.toFixed(2)}x` }), { keywords: ['speed', 'velocity'] });
+}
+
 export function buildSections(game: Game, openKeyBindings: () => void): SectionDef[] {
   const fullscreen = bindValue<string>(
     () => (document.fullscreenElement ? 'fullscreen' : 'windowed'),
@@ -230,14 +237,14 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
       {
         header: 'Mouse',
         items: [
-          check('High precision mouse', 'input.highPrecision', { hint: 'Attempts to bypass any operating system mouse acceleration. On Windows, this is equivalent to what used to be known as "Raw Input".', keywords: ['raw', 'input', 'relative', 'cursor'], unavailable: true }),
-          slider('Cursor sensitivity', 'input.sensitivity', 0.1, 6, 0.01, { keyboardStep: 0.01, format: v => `${v.toFixed(2)}x`, keywords: ['speed', 'velocity'], unavailable: true }),
+          check('High precision mouse', 'input.highPrecision', { hint: 'Attempts to bypass any operating system mouse acceleration. On Windows, this is equivalent to what used to be known as "Raw Input".', keywords: ['raw', 'input', 'relative', 'cursor'] }),
+          sensitivityItem(),
           dropdown('Confine mouse cursor to window', 'input.confine', [['never', 'Never'], ['duringGameplay', 'During Gameplay'], ['always', 'Always']] as const, { unavailable: true }),
-          check('Disable mouse wheel adjusting volume during gameplay', 'input.mouseDisableWheel', { hint: 'Volume can still be adjusted using the mouse wheel by holding "Alt"', unavailable: true }),
+          check('Disable mouse wheel adjusting volume during gameplay', 'input.mouseDisableWheel', { hint: 'Volume can still be adjusted using the mouse wheel by holding "Alt"' }),
           check('Disable clicks during gameplay', 'gameplay.disableMouseButtons'),
         ],
       },
-      { header: 'Touch', items: [check('Disable taps during gameplay', 'input.touchDisableTaps', { unavailable: true })] },
+      { header: 'Touch', items: [check('Disable taps during gameplay', 'input.touchDisableTaps')] },
     ],
   };
 
@@ -333,7 +340,7 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
         items: [
           slider('Gameplay cursor size', 'osu.cursorSize', 0.1, 2, 0.01, { keyboardStep: 0.01, format: v => `${v.toFixed(2)}x` }),
           check('Adjust gameplay cursor size based on current beatmap', 'osu.autoCursorSize'),
-          check('Show gameplay cursor during touch input', 'osu.cursorDuringTouch', { unavailable: true }),
+          check('Show gameplay cursor during touch input', 'osu.cursorDuringTouch'),
         ],
       },
       { header: 'Mods', items: [check('Increase first object visibility on visual impairment mods', 'gameplay.increaseFirstObjectVisibility')] },
@@ -425,7 +432,7 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
       {
         header: 'Screenshots',
         items: [
-          dropdown('Screenshot format', 'graphics.screenshotFormat', [['png', 'PNG (lossless)'], ['jpg', 'JPG (web-friendly)']] as const, { unavailable: true }),
+          dropdown('Screenshot format', 'graphics.screenshotFormat', [['png', 'PNG (lossless)'], ['jpg', 'JPG (web-friendly)']] as const),
           check('Show menu cursor in screenshots', 'graphics.screenshotCursor', { unavailable: true }),
         ],
       },

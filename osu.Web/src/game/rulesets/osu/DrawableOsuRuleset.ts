@@ -242,7 +242,11 @@ export class DrawableOsuRuleset implements DrawableRuleset {
   private lastUpdateTime = -Infinity;
   private firstActiveIndex = 0;
   private followPointIndex = 0;
-  private touchActions = new Map<number, Action>();
+  private touchActions = new Map<number, Action | null>();
+  private readonly tapsDisabled: boolean;
+  /** GlobalCursorDisplay: the gameplay cursor hides after touch input unless GameplayCursorDuringTouch. */
+  private lastInputTouch = false;
+  private readonly showCursorDuringTouch: boolean;
 
   // Screen transform (updated every render)
   private scale = 1;
@@ -295,6 +299,8 @@ export class DrawableOsuRuleset implements DrawableRuleset {
     this.showFollowPoints = settings.get('osu.followPoints', true);
     this.showCursorTrail = settings.get('osu.cursorTrail', true);
     this.showRipples = settings.get('osu.cursorRipples', false);
+    this.tapsDisabled = settings.get('input.touchDisableTaps', false);
+    this.showCursorDuringTouch = settings.get('osu.cursorDuringTouch', false);
     this.borderStyle = settings.get('osu.playfieldBorderStyle', 'none');
     // OsuPlayfield.ApplyCircleSizeToPlayfieldBorder: padding of -OBJECT_RADIUS * scale.
     this.borderPadding = -64 * calculateScaleFromCircleSize(playable.difficulty.circleSize, true);
@@ -429,6 +435,11 @@ export class DrawableOsuRuleset implements DrawableRuleset {
   }
 
   onPointerMove(x: number, y: number, time: number): void {
+    this.lastInputTouch = false;
+    this.moveCursorTo(x, y, time);
+  }
+
+  private moveCursorTo(x: number, y: number, time: number): void {
     // OsuModAutopilot: inputManager.AllowUserCursorMovement = false
     if (this.ctx.autoplay || this.autopilot) return;
     this.updateTo(time);
@@ -438,16 +449,20 @@ export class DrawableOsuRuleset implements DrawableRuleset {
   onTouchStart(id: number, x: number, y: number, time: number): void {
     if (this.ctx.autoplay) return;
     // OsuTouchInputMapper: first touch moves the cursor; any touch alternates the press action.
-    if (this.touchActions.size === 0 || !this.autopilot) this.onPointerMove(x, y, time);
+    this.lastInputTouch = true;
+    if (this.touchActions.size === 0 || !this.autopilot) this.moveCursorTo(x, y, time);
     const action: Action = [...this.touchActions.values()].includes('LeftButton') ? 'RightButton' : 'LeftButton';
-    this.touchActions.set(id, action);
-    this.onPressed(action, time);
+    // OsuSetting.TouchDisableGameplayTaps: touches still move the cursor but never press.
+    const pressing = !this.tapsDisabled && ![...this.touchActions.values()].includes(action);
+    this.touchActions.set(id, pressing ? action : null);
+    if (pressing) this.onPressed(action, time);
   }
 
   onTouchMove(id: number, x: number, y: number, time: number): void {
     // Only the most recent touch controls the cursor.
     const ids = [...this.touchActions.keys()];
-    if (ids[ids.length - 1] === id) this.onPointerMove(x, y, time);
+    this.lastInputTouch = true;
+    if (ids[ids.length - 1] === id) this.moveCursorTo(x, y, time);
   }
 
   onTouchEnd(id: number, _x: number, _y: number, time: number): void {
@@ -1372,7 +1387,9 @@ export class DrawableOsuRuleset implements DrawableRuleset {
 
     // Cursor (OsuPlayfield's cursor container): ripples, then trail and cursor.
     if (this.ripples.length > 0) this.drawRipples(g, time);
-    if (L && (L.has.cursor || L.has.cursorTrail)) {
+    if (this.lastInputTouch && !this.showCursorDuringTouch) {
+      // cursor hidden
+    } else if (L && (L.has.cursor || L.has.cursorTrail)) {
       g.restore();
       L.drawCursor(g, this.cursor.x, this.cursor.y, this.pressed.size > 0, time, this.scale, this.offsetX, this.offsetY, this.cursorScale, this.showCursorTrail, this.cursorScale);
       g.save();

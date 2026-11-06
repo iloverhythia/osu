@@ -1,6 +1,8 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // The top-level game (OsuGame equivalent): screen stack, background, global audio, overlays and import handling.
 
+import { VolumeOverlay } from './overlays/VolumeOverlay';
+import { APP_NAME } from '../brand';
 import { AudioEngine, Track } from '../framework/audio/AudioEngine';
 import { settings } from '../framework/Settings';
 import type { Beatmap } from '../game/beatmaps/Beatmap';
@@ -27,6 +29,8 @@ export class Game {
   private readonly bgA: HTMLDivElement;
   private readonly bgB: HTMLDivElement;
   private readonly bgParallax: HTMLDivElement;
+  readonly volume: VolumeOverlay;
+  private muted = false;
   private parallax = { x: 0, y: 0, scale: 1, mouse: null as { x: number; y: number } | null };
   private bgFront: 'A' | 'B' = 'A';
   private readonly bgDim: HTMLDivElement;
@@ -100,6 +104,9 @@ export class Game {
     window.addEventListener('focus', () => this.applyVolumes());
     document.addEventListener('visibilitychange', () => this.applyVolumes());
     this.library.subscribe(() => this.scheduleStarBackfill());
+    this.volume = new VolumeOverlay(this);
+    root.appendChild(this.volume.el);
+    window.addEventListener('wheel', this.onWheel, { passive: false });
   }
 
   // ------------------------------------------------------------------ audio
@@ -118,14 +125,94 @@ export class Game {
   private applyVolumes(): void {
     // OsuSetting.VolumeInactive scales the master volume while the window doesn't have focus.
     const inactive = typeof document !== 'undefined' && (document.hidden || !document.hasFocus());
-    const master = settings.get('audio.master', 1) * (inactive ? settings.get('audio.masterInactive', 0.25) : 1);
+    const master = this.muted ? 0 : settings.get('audio.master', 1) * (inactive ? settings.get('audio.masterInactive', 0.25) : 1);
     this.audio?.setVolumes(master, settings.get('audio.music', 1), settings.get('audio.effects', 1));
   }
 
-  playUiSample(name: string, volume = 1): void {
+  playUiSample(name: string, volume = 1, rate = 1): void {
     const b = this.audio?.getDefaultSample(name);
-    if (b) this.audio!.play(b, { volume });
+    if (b) this.audio!.play(b, { volume, rate });
   }
+
+  /**
+   * ScreenshotManager.TakeScreenshotAsync: captures the screen's canvases (gameplay is fully canvas-drawn) and saves it
+   * as OsuSetting.ScreenshotFormat.
+   */
+  async takeScreenshot(): Promise<void> {
+    const layers = this.currentScreen?.screenshotLayers?.() ?? [];
+    if (layers.length === 0) {
+      this.toast('Screenshots can only be taken during gameplay in the browser version.', 'error');
+      return;
+    }
+    const w = layers[0].width;
+    const hgt = layers[0].height;
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = hgt;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, w, hgt);
+    for (const l of layers) g.drawImage(l, 0, 0, w, hgt);
+    const png = settings.get<string>('graphics.screenshotFormat', 'jpg') === 'png';
+    const blob = await new Promise<Blob | null>(r => c.toBlob(r, png ? 'image/png' : 'image/jpeg', 0.92));
+    if (!blob) return;
+    const d = new Date();
+    const p2 = (n: number) => String(n).padStart(2, '0');
+    const name = `${APP_NAME.toLowerCase()}_${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}_${p2(d.getHours())}-${p2(d.getMinutes())}-${p2(d.getSeconds())}.${png ? 'png' : 'jpg'}`;
+    try {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      this.playUiSample('menu-confirm', 0.4);
+      this.toast(`Screenshot ${name} saved!`, 'success');
+    } catch {
+      this.toast('Downloads are blocked here.', 'error');
+    }
+  }
+
+  /** MasterVolumeMeter mute: a zero volume adjustment on the audio manager. */
+  applyMute(muted: boolean): void {
+    this.muted = muted;
+    this.applyVolumes();
+  }
+
+  /**
+   * ScrollAdjustsVolume: Alt+wheel anywhere (OsuGame), plain wheel on screens that have one (main menu, song select,
+   * player loader, gameplay unless MouseDisableWheel) when nothing scrollable is under the pointer.
+   */
+  private readonly onWheel = (e: WheelEvent): void => {
+    if (e.deltaY === 0 || e.ctrlKey) return;
+    const target = e.target as HTMLElement | null;
+    let allowed = false;
+    if (e.altKey && !e.shiftKey && !e.metaKey) allowed = true;
+    else if (!e.altKey && !e.shiftKey && !e.metaKey && !this.hasOverlay && this.currentScreen?.scrollAdjustsVolume) {
+      allowed = true;
+      for (let el = target; el && el !== document.body; el = el.parentElement) {
+        if (el.closest('.volume-overlay')) return;
+        const st = getComputedStyle(el);
+        if ((st.overflowY === 'auto' || st.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 1) {
+          allowed = false;
+          break;
+        }
+        if (el.dataset.blockScrollVolume != null) {
+          allowed = false;
+          break;
+        }
+      }
+    }
+    if (!allowed) {
+      if (this.currentScreen?.blocksWheel && !e.altKey) e.preventDefault();
+      return;
+    }
+    e.preventDefault();
+    const precise = e.deltaMode === 0 && Math.abs(e.deltaY) < 50;
+    const amount = precise ? Math.abs(e.deltaY) / 50 : 1;
+    this.volume.adjust(e.deltaY < 0 ? 'increase' : 'decrease', amount, precise);
+  };
 
   // ------------------------------------------------------------------ selection
 
@@ -363,6 +450,25 @@ export class Game {
   private handleKeyDown(e: KeyboardEvent): void {
     const target = e.target as HTMLElement | null;
     const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') && (target as HTMLInputElement).type !== 'range' && (target as HTMLInputElement).type !== 'checkbox';
+    // GlobalActionContainer: Alt+Up / Alt+Down (volume), Alt+Left / Alt+Right (volume meter), Ctrl+F4 (mute).
+    if (e.altKey && !e.ctrlKey && !e.metaKey && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+      const action = e.code === 'ArrowUp' ? 'increase' : e.code === 'ArrowDown' ? 'decrease' : e.code === 'ArrowRight' ? 'next' : 'previous';
+      if (this.volume.adjust(action)) {
+        e.preventDefault();
+        return;
+      }
+    }
+    // GlobalAction.TakeScreenshot (F12)
+    if (e.code === 'F12' && !e.repeat) {
+      e.preventDefault();
+      void this.takeScreenshot();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.code === 'F4' && !e.repeat) {
+      e.preventDefault();
+      this.volume.toggleMute();
+      return;
+    }
     const top = this.overlays[this.overlays.length - 1];
     if (top?.onKey && top.onKey(e)) {
       e.preventDefault();

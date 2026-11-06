@@ -72,10 +72,34 @@ export class PlayerScreen extends Screen {
   private readonly bgDimEl: HTMLDivElement;
   private bgDimOpacity = -1;
   private bgBlur = 0;
+  private virtualPointer: { x: number; y: number } | null = null;
   private leaderboard: GameplayLeaderboard | null = null;
   private readonly loaderSettings: HTMLDivElement;
   private loaderSettingsHovered = false;
   private replaySettings: HTMLElement | null = null;
+
+  screenshotLayers(): HTMLCanvasElement[] {
+    if (!this.gameplayStarted) return [];
+    // The background layer, its (CSS) dim, then the gameplay canvas.
+    const c = document.createElement('canvas');
+    c.width = this.canvas.width;
+    c.height = this.canvas.height;
+    const g = c.getContext('2d')!;
+    if (this.bgCanvas.style.visibility !== 'hidden') g.drawImage(this.bgCanvas, 0, 0, c.width, c.height);
+    g.fillStyle = `rgba(0, 0, 0, ${Math.max(0, this.bgDimOpacity)})`;
+    g.fillRect(0, 0, c.width, c.height);
+    g.drawImage(this.canvas, 0, 0);
+    return [c];
+  }
+
+  /** GameplayScrollWheelHandling: the wheel adjusts volume unless MouseDisableWheel (always while paused). */
+  get scrollAdjustsVolume(): boolean {
+    return this.paused || !this.gameplayStarted || !settings.get('input.mouseDisableWheel', false);
+  }
+
+  get blocksWheel(): boolean {
+    return !this.scrollAdjustsVolume;
+  }
 
   /** Player.BackgroundParallaxAmount */
   get backgroundParallaxAmount(): number {
@@ -693,13 +717,47 @@ export class PlayerScreen extends Screen {
     return false;
   }
 
+  /**
+   * High precision mouse (OsuSetting MouseSettings relativeMode): with pointer lock (raw, unadjusted movement where
+   * supported) the cursor is driven by movement deltas × cursor sensitivity, confined to the game area.
+   */
+  private get pointerLocked(): boolean {
+    return document.pointerLockElement === this.canvas;
+  }
+
+  private requestHighPrecision(e: PointerEvent): void {
+    if (!settings.get('input.highPrecision', false) || this.pointerLocked || e.pointerType !== 'mouse' || this.ruleset.shortName !== 'osu') return;
+    this.virtualPointer = this.localPos(e);
+    const c = this.canvas as HTMLCanvasElement & { requestPointerLock(o?: { unadjustedMovement?: boolean }): Promise<void> | void };
+    try {
+      const r = c.requestPointerLock({ unadjustedMovement: true });
+      if (r && typeof (r as Promise<void>).catch === 'function') (r as Promise<void>).catch(() => c.requestPointerLock());
+    } catch {
+      /* not supported */
+    }
+  }
+
+  private releaseHighPrecision(): void {
+    if (this.pointerLocked) document.exitPointerLock();
+  }
+
   private localPos(e: PointerEvent): { x: number; y: number } {
+    if (this.pointerLocked && e.pointerType === 'mouse' && this.virtualPointer) {
+      const rect = this.canvas.getBoundingClientRect();
+      const s = settings.get('input.sensitivity', 1);
+      this.virtualPointer = {
+        x: Math.min(rect.width, Math.max(0, this.virtualPointer.x + e.movementX * s)),
+        y: Math.min(rect.height, Math.max(0, this.virtualPointer.y + e.movementY * s)),
+      };
+      return this.virtualPointer;
+    }
     const rect = this.canvas.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
 
   private onPointerDown = (e: PointerEvent): void => {
     const now = performance.now();
+    if (this.gameplayStarted && !this.paused && !this.playback && !this.failed) this.requestHighPrecision(e);
     this.holdForMenu.setTouchActive(e.pointerType === 'touch' || e.pointerType === 'pen', now);
     // GlobalAction.PauseGameplay (middle mouse) / TogglePauseReplay.
     if (e.button === 1 && e.pointerType === 'mouse') {
@@ -729,7 +787,7 @@ export class PlayerScreen extends Screen {
 
   private onPointerMove = (e: PointerEvent): void => {
     if (e.pointerType === 'mouse' && (e.movementX !== 0 || e.movementY !== 0)) this.holdForMenu.setTouchActive(false, performance.now());
-    if (e.pointerType === 'mouse') this.hud?.setPointer(this.localPos(e));
+    if (e.pointerType === 'mouse') this.hud?.setPointer(this.pointerLocked ? this.virtualPointer : this.localPos(e));
     this.holdForMenu.mouseMove(e.clientX, e.clientY);
     if (!this.gameplayStarted || this.paused || this.playback || this.failed) return;
     const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [e];
@@ -982,6 +1040,7 @@ export class PlayerScreen extends Screen {
 
   /** Player.Pause */
   private pause(): boolean {
+    this.releaseHighPrecision();
     if (!this.pausingSupportedByCurrentState) return false;
     if (!this.isResuming && this.pauseCooldownActive) return false;
     if (this.isResuming) this.cancelResume();
@@ -1131,6 +1190,7 @@ export class PlayerScreen extends Screen {
   }
 
   private showResults(): void {
+    this.releaseHighPrecision();
     if (this.resultsShown) return;
     this.resultsShown = true;
     const sp = this.scoreProcessor;
@@ -1167,6 +1227,7 @@ export class PlayerScreen extends Screen {
   }
 
   onExit(): void {
+    this.releaseHighPrecision();
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     window.removeEventListener('resize', this.resize);

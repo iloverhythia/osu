@@ -297,6 +297,11 @@ const generic: Record<string, SampleDef> = {
     duration: 0.08,
     synth: (c, o) => tone(c, o, 'sine', 1400, 0.2, 0.001, 0.05, 0, 900),
   },
+  // UI/notch-tick (VolumeMeter / slider notches): a short soft click.
+  'notch-tick': {
+    duration: 0.03,
+    synth: (c, o) => tone(c, o, 'triangle', 1800, 0.12, 0.0005, 0.02),
+  },
   'menu-hover': {
     duration: 0.05,
     synth: (c, o) => tone(c, o, 'sine', 2400, 0.06, 0.001, 0.03),

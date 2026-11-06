@@ -107,6 +107,11 @@ export class SongSelectScreen extends Screen {
   private readonly localRanks = new Map<string, ScoreRank | null>();
   private readonly localRankWaiters = new Map<string, ((r: ScoreRank | null) => void)[]>();
 
+  /** ScrollAdjustsVolume */
+  get scrollAdjustsVolume(): boolean {
+    return true;
+  }
+
   constructor(game: Game) {
     super(game, 'song-select');
     this.backgroundDim = 0.1;

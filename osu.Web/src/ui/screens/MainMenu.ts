@@ -57,6 +57,11 @@ export class MainMenuScreen extends Screen {
   private lastInput = clockNow();
   private readonly onInput = () => (this.lastInput = clockNow());
 
+  /** ScrollAdjustsVolume */
+  get scrollAdjustsVolume(): boolean {
+    return true;
+  }
+
   constructor(game: Game) {
     super(game, 'menu main-menu');
     this.backgroundDim = 1;
