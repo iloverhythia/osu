@@ -713,7 +713,7 @@ export class DrawableOsuRuleset implements DrawableRuleset {
     if (fl) {
       fl.update(time, this.ctx.combo, isBreakTime(this.playable.breaks, time, this.gameplayStartTime, this.hasCompleted));
       // OsuFlashlight.OnMouseMove (only when the mouse moved this frame)
-      if (this.cursorMoved || !fl.position) fl.onMouseMove(this.offsetX + this.cursor.x * this.scale, this.offsetY + this.cursor.y * this.scale, elapsed);
+      if (this.cursorMoved) fl.onMouseMove(this.offsetX + this.cursor.x * this.scale, this.offsetY + this.cursor.y * this.scale, elapsed);
     }
     this.cursorMoved = false;
   }
@@ -1781,8 +1781,11 @@ export class DrawableOsuRuleset implements DrawableRuleset {
         if (time < fadeInTime || time > fadeOutTime + 400) continue;
         // stable uses HitObjectManager.TimeFadeIn (a constant 400) for this.
         const fadeDuration = 400;
-        let alpha = clamp((time - fadeInTime) / fadeDuration, 0, 1);
-        if (time >= fadeOutTime) alpha = Math.min(alpha, 1) * (1 - clamp((time - fadeOutTime) / fadeDuration, 0, 1));
+        // FadeIn(400), then Delay(fadeOutTime - fadeInTime).FadeOut(400) (which starts from the alpha reached by then).
+        const alpha =
+          time < fadeOutTime
+            ? clamp((time - fadeInTime) / fadeDuration, 0, 1)
+            : clamp((fadeOutTime - fadeInTime) / fadeDuration, 0, 1) * (1 - clamp((time - fadeOutTime) / fadeDuration, 0, 1));
         const move = applyEasing(Easing.Out, clamp((time - fadeInTime) / fadeDuration, 0, 1));
         const f = fraction - 0.1 + 0.1 * move;
         const sc = valueAt(time, 1.5 * end.scale, end.scale, fadeInTime, fadeInTime + fadeDuration, Easing.Out);

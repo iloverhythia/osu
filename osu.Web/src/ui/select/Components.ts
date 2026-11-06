@@ -106,7 +106,7 @@ export function shearedToggle(label: string, value: boolean, onChange: (v: boole
     const next = !b.classList.contains('active');
     b.setActive(next);
     onChange(next);
-  }, { cls: 'toggle' }) as HTMLButtonElement & { setActive(v: boolean): void };
+  }, { cls: 'ss-toggle' }) as HTMLButtonElement & { setActive(v: boolean): void };
   b.setActive = (v: boolean) => b.classList.toggle('active', v);
   b.setActive(value);
   return b;

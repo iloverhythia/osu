@@ -195,8 +195,8 @@ export class OsuFlashlight {
   readonly smoothness = 1.4;
   /** FlashlightSize.Y */
   private readonly size: Prop;
-  /** FlashlightPosition, in screen (CSS pixel) space. */
-  position: { x: number; y: number } | null = null;
+  /** FlashlightPosition, in screen (CSS pixel) space; (0, 0) until the mouse first moves. */
+  position: { x: number; y: number } = { x: 0, y: 0 };
   /** FlashlightDim */
   dim = 0;
   private activeSlider: Slider | null = null;
@@ -257,10 +257,6 @@ export class OsuFlashlight {
 
   /** OsuFlashlight.OnMouseMove (position follows the cursor with a delay). */
   onMouseMove(x: number, y: number, elapsedFrameTime: number): void {
-    if (!this.position) {
-      this.position = { x, y };
-      return;
-    }
     const t = Math.min(Math.abs(elapsedFrameTime), this.followDelay);
     this.position = {
       x: valueAt(t, this.position.x, x, 0, this.followDelay, Easing.Out),
@@ -289,7 +285,7 @@ export class OsuFlashlight {
    * The smoothstep is approximated with gradient stops.
    */
   draw(g: CanvasRenderingContext2D, width: number, height: number, time: number, playfieldScale: number): void {
-    const p = this.position ?? { x: width / 2, y: height / 2 };
+    const p = this.position;
     // scale the flashlight based on the playfield to match gameplay components scale.
     const r = Math.max(0.01, this.sizeAt(time) * playfieldScale);
     const outer = r * this.smoothness;

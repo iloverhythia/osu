@@ -1169,14 +1169,14 @@
   white-space: nowrap;
 }
 
-.sheared-button.toggle {
+.sheared-button.ss-toggle {
   font-size: 14px;
   font-weight: 600;
   height: 30px;
   padding: 0 14px;
 }
 
-.sheared-button.toggle.active {
+.sheared-button.ss-toggle.active {
   --sb-colour: var(--c-highlight1);
   color: var(--c-background6);
 }

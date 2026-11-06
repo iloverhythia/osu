@@ -248,7 +248,7 @@ describe('Relax / Autopilot', () => {
     const H = 384;
     // without a render call the screen transform is the identity.
     for (let t = r.time(); t < end; t += 1000 / 60) {
-      const target: OsuHitObject = objs.find(h => h.endTime >= t) ?? objs[objs.length - 1];
+      const target: OsuHitObject = objs.find(h => h.endTime + 50 >= t) ?? objs[objs.length - 1];
       let p = target.stackedPosition;
       if (target instanceof Slider && t >= target.startTime) p = target.stackedPositionAt(Math.min(1, (t - target.startTime) / target.duration));
       if (target instanceof Spinner) {
@@ -263,7 +263,6 @@ describe('Relax / Autopilot', () => {
   it('Relax hits objects under the cursor', () => {
     const r = setup(MAP, ['RX']);
     aim(r, 9000);
-    console.log(JSON.stringify(r.results.map(x => [x.tag, x.type, Math.round(x.at)])));
     expect(byKind(r, 'circle')[0].type).toBe(HitResult.Great);
     expect(isHit(byKind(r, 'sliderHead')[0].type)).toBe(true);
     expect(byKind(r, 'sliderTail')[0].type).toBe(HitResult.SliderTailHit);
