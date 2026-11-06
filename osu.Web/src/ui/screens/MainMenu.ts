@@ -5,6 +5,7 @@
 // Layers (back to front): ButtonSystem (DOM, in the parallax container), the logo's additive layer (visualiser,
 // ripple, side flashes, fountains, intro glitch triangles), the logo layer, the song ticker / tips, the logo hit area.
 
+import { settings } from '../../framework/Settings';
 import { APP_NAME, ATTRIBUTION } from '../../brand';
 import type { Game } from '../Game';
 import { MenuBeatSource } from '../menu/BeatSync';
@@ -157,7 +158,7 @@ export class MainMenuScreen extends Screen {
     this.buttons.state = ButtonSystemState.TopLevel;
     this.buttons.containerX.to(0, t, FADE_IN_DURATION, Easing.OutQuint);
     this.sideFlashes.alpha.to(1, t + FADE_IN_DURATION, 64, Easing.InQuint);
-    this.tips.showNextTip(t);
+    if (settings.get('ui.menuTips', true)) this.tips.showNextTip(t);
     this.bottomScale.to(1, t, 1000, Easing.OutQuint);
     this.bottomAlpha.to(1, t, 1000, Easing.OutQuint);
     this.startLoop();
@@ -225,7 +226,7 @@ export class MainMenuScreen extends Screen {
     this.logo.showTriangles = true;
     this.logo.showRipple = true;
     this.buttons.setOsuLogo(this.logo);
-    this.tips.showNextTip(t);
+    if (settings.get('ui.menuTips', true)) this.tips.showNextTip(t);
     this.footer.style.opacity = '';
     this.lastInput = t;
     if (!this.game.previewTrack?.isRunning) void this.game.startPreview();

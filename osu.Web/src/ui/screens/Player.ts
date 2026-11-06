@@ -66,6 +66,7 @@ export class PlayerScreen extends Screen {
   private readonly bgCanvas: HTMLCanvasElement;
   private readonly bgDimEl: HTMLDivElement;
   private bgDimOpacity = -1;
+  private bgBlur = 0;
   /** Key of what's currently drawn on the background layer (image + size), to redraw only when it changes. */
   private bgCanvasKey = '';
   private storyboard: StoryboardPlayer | null = null;
@@ -436,13 +437,14 @@ export class PlayerScreen extends Screen {
     const buffer = this.resolveSample(s);
     if (!buffer) return;
     const v = (s.volume > 0 ? s.volume : 100) / 100;
-    this.audio.play(buffer, { pan, volume: v * volume * this.holdVolume, rate });
+    // OsuSetting.HitsoundVolume applies to gameplay hitsounds only.
+    this.audio.play(buffer, { pan, volume: v * volume * this.holdVolume * settings.get('audio.hitsound', 0.6), rate });
   }
 
   private startLoop(s: HitSampleInfo, pan: number, volume: number): LoopHandle | null {
     const buffer = this.resolveSample(s);
     if (!buffer) return null;
-    const v = (s.volume > 0 ? s.volume : 100) / 100;
+    const v = ((s.volume > 0 ? s.volume : 100) / 100) * settings.get('audio.hitsound', 0.6);
     const loop = this.audio.loop(buffer, { pan, volume: v * volume });
     this.loops.add(loop);
     return {
@@ -1257,6 +1259,12 @@ export class PlayerScreen extends Screen {
     if (Math.abs(layerDim - this.bgDimOpacity) > 0.001) {
       this.bgDimOpacity = layerDim;
       this.bgDimEl.style.opacity = String(layerDim);
+    }
+    // OsuSetting.BlurLevel × BackgroundScreenBeatmap.BACKGROUND_BLUR (20), on the cached background layer.
+    const blur = Math.round(settings.get('gameplay.backgroundBlur', 0) * 20 * (window.innerHeight / 768) * 10) / 10;
+    if (blur !== this.bgBlur) {
+      this.bgBlur = blur;
+      this.bgCanvas.style.filter = blur > 0 ? `blur(${blur}px)` : '';
     }
 
     // Player.OnEntering: ScaleTo(0.7) → 1 over 750 (OutQuint), Delay(250).FadeIn(250); GameplayClockContainer.FadeInFromZero(750, OutQuint).

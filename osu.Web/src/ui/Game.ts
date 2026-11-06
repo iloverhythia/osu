@@ -37,7 +37,7 @@ export class Game {
   private readonly fpsEl: HTMLDivElement;
 
   private stack: Screen[] = [];
-  private overlays: { el: HTMLElement; onKey?: (e: KeyboardEvent) => boolean; onClose?: () => void }[] = [];
+  private overlays: { el: HTMLElement; onKey?: (e: KeyboardEvent) => boolean; onClose?: () => void; capture?: boolean }[] = [];
 
   // Selection state (Bindable<WorkingBeatmap> / Bindable<RulesetInfo> / Bindable<Mods> in lazer)
   working: WorkingBeatmap | null = null;
@@ -94,6 +94,9 @@ export class Game {
     settings.subscribe(key => {
       if (key.startsWith('audio.')) this.applyVolumes();
     });
+    window.addEventListener('blur', () => this.applyVolumes());
+    window.addEventListener('focus', () => this.applyVolumes());
+    document.addEventListener('visibilitychange', () => this.applyVolumes());
     this.library.subscribe(() => this.scheduleStarBackfill());
   }
 
@@ -111,7 +114,10 @@ export class Game {
   }
 
   private applyVolumes(): void {
-    this.audio?.setVolumes(settings.get('audio.master', 0.8), settings.get('audio.music', 0.8), settings.get('audio.effects', 0.8));
+    // OsuSetting.VolumeInactive scales the master volume while the window doesn't have focus.
+    const inactive = typeof document !== 'undefined' && (document.hidden || !document.hasFocus());
+    const master = settings.get('audio.master', 1) * (inactive ? settings.get('audio.masterInactive', 0.25) : 1);
+    this.audio?.setVolumes(master, settings.get('audio.music', 1), settings.get('audio.effects', 1));
   }
 
   playUiSample(name: string, volume = 1): void {
@@ -298,7 +304,7 @@ export class Game {
 
   // ------------------------------------------------------------------ overlays
 
-  openOverlay(el: HTMLElement, opts: { onKey?: (e: KeyboardEvent) => boolean; onClose?: () => void } = {}): void {
+  openOverlay(el: HTMLElement, opts: { onKey?: (e: KeyboardEvent) => boolean; onClose?: () => void; capture?: boolean } = {}): void {
     el.style.pointerEvents = 'auto';
     this.overlayLayer.appendChild(el);
     this.overlays.push({ el, ...opts });
@@ -334,6 +340,8 @@ export class Game {
       e.preventDefault();
       return;
     }
+    // Modal overlays (settings) keep keys away from the screen underneath, without blocking typing in their inputs.
+    if (top?.capture) return;
     if (e.code === 'Escape') {
       e.preventDefault();
       if (typing) (target as HTMLInputElement).blur();
