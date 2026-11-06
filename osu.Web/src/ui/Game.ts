@@ -395,6 +395,17 @@ export class Game {
     const replays = files.filter(f => f.name.toLowerCase().endsWith('.osr'));
     files = files.filter(f => !f.name.toLowerCase().endsWith('.osk') && !f.name.toLowerCase().endsWith('.osr'));
     for (const r of replays) await this.openReplayFile(r);
+    // A loose folder with a skin.ini and no beatmaps is a skin, not a beatmap set.
+    const isLooseSkin = files.length > 0 && files.some(f => f.name.toLowerCase() === 'skin.ini') && !files.some(f => /\.(osu|osz)$/i.test(f.name));
+    if (isLooseSkin) {
+      try {
+        const name = await importSkin(files);
+        this.toast(`Imported skin "${name}"`, 'success');
+      } catch (e) {
+        this.toast(`Skin import failed: ${e instanceof Error ? e.message : String(e)}`, 'error', 6000);
+      }
+      return;
+    }
     for (const skin of skins) {
       try {
         const name = await importSkin([skin]);
