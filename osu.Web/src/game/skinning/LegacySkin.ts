@@ -52,8 +52,12 @@ export interface LoadedSkin {
   customColour(name: string): Colour4 | null;
   /** LegacyManiaSkinConfigurationLookup source: the [Mania] configuration for a key count (null for beatmap skins). */
   maniaConfig(keys: number): LegacyManiaSkinConfiguration | null;
-  /** LegacySkin.GetSample for a hit sample (bank / custom sample bank / universal fallbacks). */
-  getHitSample(info: HitSampleInfo): AudioBuffer | null;
+  /**
+   * LegacySkin.GetSample for a hit sample (bank / custom sample bank / universal fallbacks).
+   * `rulesetPrefix` is inserted before each lookup name's last path component, as TaikoLegacySkinTransformer's
+   * LegacyTaikoSampleInfo does with "taiko-".
+   */
+  getHitSample(info: HitSampleInfo, rulesetPrefix?: string): AudioBuffer | null;
 }
 
 const IMAGE_EXTENSIONS = ['png', 'jpg'];
@@ -319,8 +323,8 @@ export class LegacySkin implements LoadedSkin {
     return null;
   }
 
-  getHitSample(info: HitSampleInfo): AudioBuffer | null {
-    for (const lookup of legacyLookupNames(info, this.useCustomSampleBanks)) {
+  getHitSample(info: HitSampleInfo, rulesetPrefix?: string): AudioBuffer | null {
+    for (const lookup of legacyLookupNames(info, this.useCustomSampleBanks, rulesetPrefix)) {
       const s = this.sampleFromFiles(lookup);
       if (s) return s;
     }
@@ -411,9 +415,9 @@ export class LegacyBeatmapSkin extends LegacySkin {
     return null;
   }
 
-  getHitSample(info: HitSampleInfo): AudioBuffer | null {
+  getHitSample(info: HitSampleInfo, rulesetPrefix?: string): AudioBuffer | null {
     if (!info.useBeatmapSamples) return null;
-    return super.getHitSample(info);
+    return super.getHitSample(info, rulesetPrefix);
   }
 }
 
@@ -434,9 +438,11 @@ export function hitSampleLookupNames(info: HitSampleInfo): string[] {
   return names;
 }
 
-/** LegacySkin.getLegacyLookupNames */
-export function legacyLookupNames(info: HitSampleInfo, useCustomSampleBanks: boolean): string[] {
-  let lookupNames = hitSampleLookupNames(info).flatMap(getFallbackSampleNames);
+/** LegacySkin.getLegacyLookupNames (optionally with a ruleset prefix, see LegacyTaikoSampleInfo). */
+export function legacyLookupNames(info: HitSampleInfo, useCustomSampleBanks: boolean, rulesetPrefix?: string): string[] {
+  let names = hitSampleLookupNames(info);
+  if (rulesetPrefix) names = names.map(n => n.slice(0, n.lastIndexOf('/') + 1) + rulesetPrefix + n.slice(n.lastIndexOf('/') + 1));
+  let lookupNames = names.flatMap(getFallbackSampleNames);
   const suffix = info.suffix;
   if (suffix) {
     // for compatibility with stable:

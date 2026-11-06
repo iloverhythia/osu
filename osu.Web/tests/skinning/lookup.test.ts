@@ -234,3 +234,13 @@ describe('SkinImporter rules', () => {
     expect(importedSkinMetadata('Cool (me).osk', '[General]\nName: Cool\nAuthor: me')).toEqual({ name: 'Cool', creator: 'me' });
   });
 });
+
+describe('ruleset sample prefixes', () => {
+  it('taiko lookups insert "taiko-" before the last path component and keep the universal fallback', async () => {
+    const info = new HitSampleInfo({ name: 'hitclap', bank: 'drum' });
+    expect(legacyLookupNames(info, false, 'taiko-')).toEqual(['Gameplay/taiko-drum-hitclap', 'taiko-drum-hitclap', 'Gameplay/taiko-hitclap', 'taiko-hitclap', 'hitclap']);
+    const skin = await userSkin({ 'drum-hitclap.wav': snd('plain'), 'taiko-drum-hitclap.wav': snd('taiko') });
+    expect(nameOf(resolveSkinHitSample([skin], info, undefined, 'taiko-'))).toBe('taiko');
+    expect(nameOf(resolveSkinHitSample([skin], info))).toBe('plain');
+  });
+});

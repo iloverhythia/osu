@@ -1,7 +1,9 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // Port of DrawableStoryboard.StoryboardResourceLookupStore + Storyboard.GetStoragePathFromStoryboardPath (texture lookups for storyboard
 // paths, case-insensitive like BeatmapSetInfo.GetPathForFile), backed by lazily decoded ImageBitmaps instead of osu-framework's TextureStore.
-// Colour tinting (Drawable.Colour, which multiplies the texture on the GPU in lazer) is emulated with a cache of tinted offscreen canvases.
+// Colour tinting (Drawable.Colour, which multiplies the texture on the GPU in lazer) is emulated exactly: static colours use an LRU cache of
+// per-pixel tinted copies; colours that are mid-fade use a per-channel decomposition of the texture (see `getChannels`), and single-colour
+// textures (e.g. 1x1 "pixel.png") are drawn as filled rectangles.
 
 import type { Storyboard } from './Storyboard';
 
@@ -27,6 +29,8 @@ export class StoryboardTexture {
    * colour fades exactly without creating a tinted copy per frame: tint(c) = silhouette erase + Σ channel_i · c_i (additively).
    */
   channels: DrawSource[] | null = null;
+  /** Unpremultiplied RGBA pixels, read back lazily for tinting. */
+  pixels: Uint8ClampedArray | null = null;
   /** The latest time any element using this texture is displayed until (used for eviction). */
   lastUseEnd = -Infinity;
 
@@ -188,6 +192,7 @@ export class StoryboardTextureStore {
     tex.bitmap = null;
     tex.channels?.forEach(closeSource);
     tex.channels = null;
+    tex.pixels = null;
     tex.state = TextureState.None;
     for (const [key, entry] of this.tintCache) {
       if (Math.floor(key / 16777216) === tex.id) {
@@ -199,7 +204,7 @@ export class StoryboardTextureStore {
   }
 
   /** A copy of the texture multiplied by the given colour (0..255 per channel), cached (LRU) per texture and colour. */
-  getTinted(tex: StoryboardTexture, r: number, g: number, b: number): CanvasImageSource | null {
+  getTinted(tex: StoryboardTexture, r: number, g: number, b: number): DrawSource | null {
     const bitmap = tex.bitmap;
     if (!bitmap) return null;
     const rgb = (r << 16) | (g << 8) | b;
@@ -214,17 +219,22 @@ export class StoryboardTextureStore {
 
     const pixels = tex.width * tex.height;
     if (pixels > TINT_CACHE_PIXEL_BUDGET) return bitmap;
+    const data = this.getPixels(tex);
+    if (!data) return bitmap;
 
+    // Exact multiplicative tint (as the GPU does in lazer): rgb * colour, alpha unchanged.
+    const img = new ImageData(tex.width, tex.height);
+    const out = img.data;
+    for (let i = 0; i < data.length; i += 4) {
+      out[i] = (data[i] * r + 127) / 255;
+      out[i + 1] = (data[i + 1] * g + 127) / 255;
+      out[i + 2] = (data[i + 2] * b + 127) / 255;
+      out[i + 3] = data[i + 3];
+    }
     const canvas = createCanvas(tex.width, tex.height);
     const cx = canvas.getContext('2d') as Canvas2D | null;
     if (!cx) return bitmap;
-    cx.drawImage(bitmap, 0, 0);
-    cx.globalCompositeOperation = 'multiply';
-    cx.fillStyle = this.fillStyle(r, g, b);
-    cx.fillRect(0, 0, tex.width, tex.height);
-    // restore the texture's alpha channel
-    cx.globalCompositeOperation = 'destination-in';
-    cx.drawImage(bitmap, 0, 0);
+    cx.putImageData(img, 0, 0);
 
     const source = finish(canvas);
     this.tintCache.set(key, { canvas: source, pixels });
@@ -239,6 +249,23 @@ export class StoryboardTextureStore {
     return source;
   }
 
+  /** Reads back the texture's (unpremultiplied) pixels, cached on the texture. */
+  private getPixels(tex: StoryboardTexture): Uint8ClampedArray | null {
+    if (tex.pixels) return tex.pixels;
+    const bitmap = tex.bitmap;
+    if (!bitmap) return null;
+    try {
+      const src = createCanvas(tex.width, tex.height);
+      const sx = src.getContext('2d', { willReadFrequently: true } as CanvasRenderingContext2DSettings) as Canvas2D | null;
+      if (!sx) return null;
+      sx.drawImage(bitmap, 0, 0);
+      tex.pixels = sx.getImageData(0, 0, tex.width, tex.height).data;
+      return tex.pixels;
+    } catch {
+      return null;
+    }
+  }
+
   /** The per-channel decomposition of a texture (see `StoryboardTexture.channels`), or null if it can't be built. */
   getChannels(tex: StoryboardTexture): DrawSource[] | null {
     if (tex.channels) return tex.channels;
@@ -247,11 +274,8 @@ export class StoryboardTextureStore {
     const h = tex.height;
     if (!bitmap || w * h > 4096 * 4096) return null;
     try {
-      const src = createCanvas(w, h);
-      const sx = src.getContext('2d', { willReadFrequently: true } as CanvasRenderingContext2DSettings) as Canvas2D | null;
-      if (!sx) return null;
-      sx.drawImage(bitmap, 0, 0);
-      const data = sx.getImageData(0, 0, w, h).data;
+      const data = this.getPixels(tex);
+      if (!data) return null;
       const result: DrawSource[] = [];
       for (let channel = -1; channel < 3; channel++) {
         const img = new ImageData(w, h);
@@ -290,6 +314,7 @@ export class StoryboardTextureStore {
       tex.bitmap = null;
       tex.channels?.forEach(closeSource);
       tex.channels = null;
+      tex.pixels = null;
       tex.state = TextureState.None;
     }
     for (const entry of this.tintCache.values()) closeSource(entry.canvas);

@@ -330,11 +330,17 @@ export function drawLegacyText(
 /**
  * Resolves a hit sample through the skins (beatmap skin, then user skin), as LegacySkinTransformer.GetSample + LegacySkin.GetSample do:
  * a layered hitsound is silenced when a skin has "LayeredHitSounds: 0". Returns null if no skin provides the sample.
+ * Pass `rulesetPrefix = 'taiko-'` for osu!taiko (TaikoLegacySkinTransformer.LegacyTaikoSampleInfo).
  */
-export function resolveSkinHitSample(skins: readonly LoadedSkin[], info: HitSampleInfo, silent: () => AudioBuffer | null = defaultSilent): AudioBuffer | null {
+export function resolveSkinHitSample(
+  skins: readonly LoadedSkin[],
+  info: HitSampleInfo,
+  silent: () => AudioBuffer | null = defaultSilent,
+  rulesetPrefix?: string,
+): AudioBuffer | null {
   for (const skin of skins) {
     if (info.isLayered && parseConfigBool(skin.lookup('LayeredHitSounds')) === false) return silent();
-    const s = skin.getHitSample(info);
+    const s = skin.getHitSample(info, rulesetPrefix);
     if (s) return s;
   }
   return null;
