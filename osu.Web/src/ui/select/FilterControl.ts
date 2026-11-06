@@ -6,9 +6,8 @@ import { settings } from '../../framework/Settings';
 import type { ModSet } from '../../game/mods/Mods';
 import type { Ruleset } from '../../game/rulesets/Ruleset';
 import { h } from '../dom';
-import { Easing, tween } from './Anim';
 import { createRulesetFilterCriteria } from './BeatmapCarouselFilters';
-import { css, darken, foregroundTextColourFor, forStarDifficultyText, gray, lerpColour, lighten, OsuColour, OverlayColourProvider, sampleFromLinearGradient, STAR_DIFFICULTY_SPECTRUM } from './Colours';
+import { css, foregroundTextColourFor, forStarDifficultyText, gray, lerpColour, lighten, OsuColour, OverlayColourProvider, sampleFromLinearGradient, STAR_DIFFICULTY_SPECTRUM } from './Colours';
 import { ShearedDropdown, shearedButton, shearedToggle } from './Components';
 import { FilterBeatmapSet, FilterCriteria, GROUP_MODE_NAMES, GroupMode, SORT_MODE_NAMES, SortMode } from './FilterCriteria';
 import { applyQueries } from './FilterQueryParser';
@@ -217,7 +216,7 @@ class DifficultyRangeSlider {
   private readonly upperRight: HTMLDivElement;
 
   constructor(
-    private readonly colours: OverlayColourProvider,
+    colours: OverlayColourProvider,
     private readonly onChange: () => void,
   ) {
     this.lower = settings.get('select.starsMin', STARS_MIN_DEFAULT);
@@ -304,9 +303,5 @@ class DifficultyRangeSlider {
     this.border.style.transition = t;
     this.border.style.left = `${pct(this.lower)}%`;
     this.border.style.width = `calc(${pct(this.upper) - pct(this.lower)}% + var(--nub-width))`;
-    void darken;
-    void tween;
-    void Easing;
-    void this.colours;
   }
 }

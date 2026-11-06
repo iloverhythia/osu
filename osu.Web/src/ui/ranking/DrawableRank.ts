@@ -48,7 +48,7 @@ export class DrawableRank {
     g.textBaseline = 'middle';
     g.textAlign = 'center';
     const text = rankLetter(this.rank);
-    const letterSpacing = -3;
+    const letterSpacing = -1; // -3 with Venera's wider glyphs
     const widths = [...text].map(ch => g.measureText(ch).width);
     const total = widths.reduce((a, b) => a + b, 0) + letterSpacing * (text.length - 1);
     let x = 32 - total / 2;

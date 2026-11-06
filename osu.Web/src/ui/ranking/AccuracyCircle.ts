@@ -332,7 +332,8 @@ export class AccuracyCircle {
         ctx.shadowBlur = 16;
         ctx.fillStyle = textColour;
       }
-      spacedText(ctx, letter, 0, 4, -15);
+      // Spacing -15 is tuned for Venera's wide glyphs; Exo 2 is narrower.
+      spacedText(ctx, letter, 0, 4, -5);
       ctx.restore();
     }
   }

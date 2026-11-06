@@ -142,12 +142,12 @@
 
 .sp-title {
   font-size: 20px;
-  line-height: 1.2;
+  line-height: 1.1;
 }
 
 .sp-artist {
   font-size: 14px;
-  line-height: 1.2;
+  line-height: 1.1;
 }
 
 .sp-circle-holder {
@@ -180,7 +180,7 @@
   margin-bottom: 5px;
   font-size: 60px;
   font-weight: 300;
-  line-height: 1.1;
+  line-height: 0.95;
   letter-spacing: -5px;
   font-variant-numeric: tabular-nums;
 }
@@ -250,7 +250,8 @@
 
 .sp-difficulty-name {
   font-size: 16px;
-  line-height: 1.2;
+  line-height: 1.1;
+  margin-top: 2px;
 }
 
 .sp-mapper {
@@ -300,7 +301,7 @@
 }
 
 .stat-display-content {
-  line-height: 1.2;
+  line-height: 1.05;
 }
 
 .stat-counter-row {
@@ -808,6 +809,9 @@
 }
 
 @media (max-width: 760px) {
+  .animated-button.wide {
+    width: 110px;
+  }
   .statistics-panel {
     padding-left: 16px;
     padding-right: 16px;

@@ -6,11 +6,11 @@
 // ModPresetColumn is not ported (presets are stored in Realm in lazer).
 
 import '../select/select.css';
-import { MOD_SETTINGS, MODS, ModDef, ModSet, ModType } from '../../game/mods/Mods';
+import { MOD_SETTINGS, MODS, ModDef, ModType } from '../../game/mods/Mods';
 import { clear, h } from '../dom';
 import type { Game } from '../Game';
-import { cssEasing, Easing, sequence, tween } from '../select/Anim';
-import { css, darken, forModType, gray, lighten, OsuColour, OverlayColourProvider, OverlayColourScheme, RGBA } from '../select/Colours';
+import { cssEasing, Easing, tween } from '../select/Anim';
+import { css, darken, forModType, lighten, OsuColour, OverlayColourProvider, OverlayColourScheme, RGBA } from '../select/Colours';
 import { StarRatingDisplay } from '../select/Components';
 import { difficultyCache } from '../select/DifficultyCache';
 import { format0dd, getBeatmapAttributesForDisplay } from '../select/DisplayAttributes';
@@ -22,7 +22,6 @@ import { roundBPM } from '../select/BeatmapCarouselFilters';
 const PADDING = 14;
 const HEADER_HEIGHT = 70 + 2 * 14;
 const FOOTER_HEIGHT = 50;
-const PANEL_HEIGHT = 42;
 const COLUMN_WIDTH = 320;
 const DISTANCE = 700;
 
@@ -606,7 +605,5 @@ class ModSelectOverlay {
       }
     }
     setTimeout(() => (this.root.parentElement?.classList.contains('mso-standalone') ? this.root.parentElement.remove() : this.root.remove()), 500);
-    void sequence;
-    void gray;
   }
 }

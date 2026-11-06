@@ -7,7 +7,7 @@
 import '../select/select.css';
 import { settings } from '../../framework/Settings';
 import { RULESET_DISPLAY_NAMES } from '../../brand';
-import { MODS, ModSet } from '../../game/mods/Mods';
+import { ModSet } from '../../game/mods/Mods';
 import { availableRulesets } from '../../game/rulesets';
 import type { ScoreRank } from '../../game/scoring/ScoreRank';
 import { Database, type BeatmapSetRecord, type ScoreRecord } from '../../game/storage/Database';
@@ -19,11 +19,11 @@ import { openSettings } from '../overlays/Settings';
 import { Screen } from '../Screen';
 import { confirmDialog } from '../confirm';
 import { PlayerScreen } from './Player';
-import { cssEasing, Easing, tween } from '../select/Anim';
+import { cssEasing, Easing } from '../select/Anim';
 import { BeatmapCarousel } from '../select/BeatmapCarousel';
 import { allowGameplayWithRuleset, CarouselItem, GroupDefinition, GroupedBeatmap, GroupedBeatmapSet, ManiaFilterCriteria } from '../select/BeatmapCarouselFilters';
 import { CarouselModelBuilder, setLastPlayed, getLastPlayed } from '../select/CarouselModel';
-import { css, OverlayColourProvider, OverlayColourScheme, OsuColour } from '../select/Colours';
+import { OverlayColourProvider, OverlayColourScheme, OsuColour } from '../select/Colours';
 import { closeContextMenu, MenuItem, showContextMenu } from '../select/Components';
 import { FilterControl, HEIGHT_FROM_SCREEN_TOP } from '../select/FilterControl';
 import type { FilterBeatmap, FilterCriteria } from '../select/FilterCriteria';
@@ -213,7 +213,7 @@ export class SongSelectScreen extends Screen {
     this.carouselContainer = h('div', { class: 'ss-carousel-container', style: { top: `${HEIGHT_FROM_SCREEN_TOP + 5}px`, bottom: '5px' } }, this.carousel.el, this.noResults.el);
     this.rightColumn = h('div', { class: 'ss-right' }, this.rightGradient, this.carouselContainer, this.filterControl.el);
 
-    this.mainContent = h('div', { class: 'ss-main', style: { paddingBottom: `${FOOTER_HEIGHT}px` } }, h('div', { class: 'ss-left-gradient' }), this.leftColumn, this.rightColumn);
+    this.mainContent = h('div', { class: 'ss-main' }, h('div', { class: 'ss-left-gradient' }), this.leftColumn, this.rightColumn);
     this.scaleRoot = h('div', { class: 'ss-scale' }, h('div', { class: 'ss-screen-area', style: { top: `${TOOLBAR_HEIGHT}px` } }, this.mainContent, this.footer.el), this.toolbar);
     this.colours.apply(this.scaleRoot);
     this.scaleRoot.style.setProperty('--ss-outquint', cssEasing(Easing.OutQuint));
@@ -999,6 +999,3 @@ function backgroundUrl(set: BeatmapSetRecord): string | null {
   return u;
 }
 
-void MODS;
-void css;
-void tween;

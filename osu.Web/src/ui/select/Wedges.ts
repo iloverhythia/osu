@@ -116,7 +116,7 @@ class StatisticDifficulty {
   private readonly valueIcon: HTMLSpanElement;
   labelText = '';
 
-  constructor(private readonly colours: OverlayColourProvider) {
+  constructor(colours: OverlayColourProvider) {
     this.bar = h('div', { class: 'sd-bar' });
     this.adjustedBar = h('div', { class: 'sd-bar adjusted' });
     this.label = h('div', { class: 'sd-label' });

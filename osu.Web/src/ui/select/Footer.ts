@@ -171,23 +171,23 @@ export class FooterButtonMods extends ScreenFooterButton {
     this.modDisplayBar.style.transition = this.unrankedBadge.style.transition = `transform ${d}ms ${ease}, opacity ${d}ms ${ease}`;
     this.el.style.transition = `width ${d}ms ${ease}`;
     if (mods.isEmpty) {
-      this.modDisplayBar.style.transform = 'translateY(20px)';
+      this.modDisplayBar.style.transform = 'translateY(20px) skewX(var(--shear))';
       this.modDisplayBar.style.opacity = '0';
-      this.unrankedBadge.style.transform = 'translateY(20px)';
+      this.unrankedBadge.style.transform = 'translateY(20px) skewX(var(--shear))';
       this.unrankedBadge.style.opacity = '0';
       this.el.style.transition = `width ${d}ms ${ease} ${d}ms`;
       this.el.style.width = `${BUTTON_WIDTH}px`;
     } else {
       if (!mods.isRanked) {
-        this.unrankedBadge.style.transform = 'translate(0, -5px)';
+        this.unrankedBadge.style.transform = 'translate(0, -5px) skewX(var(--shear))';
         this.unrankedBadge.style.opacity = '1';
         this.el.style.width = `${BUTTON_WIDTH + 5 + this.unrankedBadge.offsetWidth}px`;
       } else {
-        this.unrankedBadge.style.transform = `translate(${-this.unrankedBadge.offsetWidth}px, -5px)`;
+        this.unrankedBadge.style.transform = `translate(${-this.unrankedBadge.offsetWidth}px, -5px) skewX(var(--shear))`;
         this.unrankedBadge.style.opacity = '0';
         this.el.style.width = `${BUTTON_WIDTH}px`;
       }
-      this.modDisplayBar.style.transform = 'translateY(-5px)';
+      this.modDisplayBar.style.transform = 'translateY(-5px) skewX(var(--shear))';
       this.modDisplayBar.style.opacity = '1';
     }
     this.modDisplay.textContent = '';
