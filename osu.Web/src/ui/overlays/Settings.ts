@@ -6,7 +6,7 @@ import { availableRulesets } from '../../game/rulesets';
 import type { Ruleset } from '../../game/rulesets/Ruleset';
 import { clear, h, keyLabel } from '../dom';
 import type { Game } from '../Game';
-import { ATTRIBUTION, RULESET_DISPLAY_NAMES } from '../../brand';
+import { APP_NAME, ATTRIBUTION, CREDITS, RULESET_DISPLAY_NAMES } from '../../brand';
 import { skinSettingsSection } from './SkinSettings';
 import { confirmDialog } from '../confirm';
 
@@ -214,6 +214,8 @@ export function openSettings(game: Game): void {
       },
       'Delete all beatmaps & scores',
     ),
+    h('h3', null, 'Credits'),
+    h('p', { style: { lineHeight: '1.6', margin: '0' } }, `${APP_NAME} by ${CREDITS.join(', ')}`),
     h('p', { style: { color: 'var(--fg-faint)', fontSize: '12px', lineHeight: '1.6', marginTop: '24px' } }, ATTRIBUTION),
   );
 
