@@ -430,10 +430,18 @@ export class SongSelectScreen extends Screen {
     const wrap = h('div');
     for (const s of list) {
       const rank = s.rank as ScoreRank;
+      const watch = async () => {
+        if (!s.hasReplay || s.id == null) return;
+        const replay = await Database.getReplay(s.id);
+        const w = this.game.working;
+        if (!replay || !w) return;
+        const { ModSet } = await import('../../game/mods/Mods');
+        this.game.push(new PlayerScreen(this.game, w, this.game.ruleset, new ModSet(s.mods), replay));
+      };
       wrap.appendChild(
         h(
           'div',
-          { class: 'score-row' },
+          { class: 'score-row', style: s.hasReplay ? { cursor: 'pointer' } : {}, title: s.hasReplay ? 'Click to watch the replay' : undefined, onclick: watch },
           h('div', { class: 'rank', style: { color: RANK_COLOURS[rank] ?? '#fff' } }, RANK_DISPLAY[rank] ?? s.rank),
           h(
             'div',
@@ -441,7 +449,7 @@ export class SongSelectScreen extends Screen {
             h('div', null, h('b', null, formatNumber(s.totalScore)), ` · ${(s.accuracy * 100).toFixed(2)}% · ${s.maxCombo}x`),
             h('div', { class: 'sub' }, `${s.player} · ${new Date(s.date).toLocaleDateString()}${s.mods.length ? ` · ${s.mods.join('')}` : ''}`),
           ),
-          h('div', { style: { color: 'var(--fg-dim)', fontWeight: '700' } }, s.pp ? `${Math.round(s.pp)}pp` : ''),
+          h('div', { style: { color: 'var(--fg-dim)', fontWeight: '700', textAlign: 'right' } }, s.pp ? `${Math.round(s.pp)}pp` : '', s.hasReplay ? h('div', { class: 'sub' }, '▶ replay') : null),
         ),
       );
     }

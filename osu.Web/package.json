@@ -13,7 +13,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "fflate": "^0.8.2"
+    "fflate": "^0.8.2",
+    "lzma": "^2.3.2"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

@@ -27,6 +27,8 @@ export interface BeatmapEntry {
   /** Star rating for the native ruleset (nomod), if computed. */
   stars?: number;
   onlineId: number;
+  /** MD5 of the .osu file (how osu! identifies beatmaps in replays). */
+  md5?: string;
 }
 
 export interface BeatmapSetRecord {
@@ -52,10 +54,11 @@ export interface ScoreRecord {
   date: number;
   pp?: number;
   player: string;
+  hasReplay?: boolean;
 }
 
 const DB_NAME = 'osu-web';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -66,6 +69,7 @@ function open(): Promise<IDBDatabase> {
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains('sets')) db.createObjectStore('sets', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('replays')) db.createObjectStore('replays', { keyPath: 'scoreId' });
         if (!db.objectStoreNames.contains('scores')) {
           const scores = db.createObjectStore('scores', { keyPath: 'id', autoIncrement: true });
           scores.createIndex('beatmapHash', 'beatmapHash');
@@ -127,7 +131,24 @@ export const Database = {
 
   async deleteScore(id: number): Promise<void> {
     const db = await open();
-    await wrap(db.transaction('scores', 'readwrite').objectStore('scores').delete(id));
+    const tx = db.transaction(['scores', 'replays'], 'readwrite');
+    tx.objectStore('scores').delete(id);
+    tx.objectStore('replays').delete(id);
+    await new Promise<void>((res, rej) => {
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  },
+
+  async putReplay(scoreId: number, replay: import('../replays/Replay').Replay): Promise<void> {
+    const db = await open();
+    await wrap(db.transaction('replays', 'readwrite').objectStore('replays').put({ scoreId, replay }));
+  },
+
+  async getReplay(scoreId: number): Promise<import('../replays/Replay').Replay | undefined> {
+    const db = await open();
+    const rec = (await wrap(db.transaction('replays').objectStore('replays').get(scoreId))) as { replay: import('../replays/Replay').Replay } | undefined;
+    return rec?.replay;
   },
 };
 

@@ -12,6 +12,9 @@ import type { Ruleset } from '../game/rulesets/Ruleset';
 import type { BeatmapEntry, BeatmapSetRecord } from '../game/storage/Database';
 import { importFiles } from '../game/storage/Importer';
 import { importSkin } from '../game/skinning';
+import { decodeOsr, legacyFramesToReplay } from '../game/replays/LegacyReplay';
+import { md5 } from '../game/replays/md5';
+import { findFile } from '../game/storage/Importer';
 import { h } from './dom';
 import type { Screen } from './Screen';
 import { Triangles } from './Triangles';
@@ -58,7 +61,7 @@ export class Game {
     this.overlayLayer = h('div', { class: 'layer', style: { pointerEvents: 'none' } });
     this.toastLayer = h('div', { class: 'toasts' });
     this.fpsEl = h('div', { class: 'fps' });
-    this.fileInput = h('input', { type: 'file', accept: '.osz,.osu,.osk,.zip', multiple: true, style: { display: 'none' } });
+    this.fileInput = h('input', { type: 'file', accept: '.osz,.osu,.osk,.osr,.zip', multiple: true, style: { display: 'none' } });
     this.folderInput = h('input', { type: 'file', multiple: true, style: { display: 'none' } });
     this.folderInput.setAttribute('webkitdirectory', '');
 
@@ -359,7 +362,9 @@ export class Game {
 
   async importFiles(files: File[]): Promise<void> {
     const skins = files.filter(f => f.name.toLowerCase().endsWith('.osk'));
-    files = files.filter(f => !f.name.toLowerCase().endsWith('.osk'));
+    const replays = files.filter(f => f.name.toLowerCase().endsWith('.osr'));
+    files = files.filter(f => !f.name.toLowerCase().endsWith('.osk') && !f.name.toLowerCase().endsWith('.osr'));
+    for (const r of replays) await this.openReplayFile(r);
     for (const skin of skins) {
       try {
         const name = await importSkin([skin]);
@@ -383,6 +388,44 @@ export class Game {
       if (result.imported.length === 0 && result.errors.length === 0) this.toast('No beatmaps found in the selected files', 'error');
     } catch (e) {
       this.toast(`Import failed: ${e instanceof Error ? e.message : String(e)}`, 'error', 6000);
+    }
+  }
+
+  /** Finds a beatmap by the MD5 of its .osu file (computing and caching hashes for older imports). */
+  async findBeatmapByMD5(hash: string): Promise<{ set: BeatmapSetRecord; entry: BeatmapEntry } | null> {
+    await this.library.load();
+    for (const set of this.library.sets) for (const entry of set.beatmaps) if (entry.md5 === hash) return { set, entry };
+    for (const set of this.library.sets) {
+      for (const entry of set.beatmaps) {
+        if (entry.md5) continue;
+        const blob = findFile(set.files, entry.filename);
+        if (!blob) continue;
+        entry.md5 = md5(new Uint8Array(await blob.arrayBuffer()));
+        if (entry.md5 === hash) return { set, entry };
+      }
+    }
+    return null;
+  }
+
+  /** Opens an osu!stable / lazer .osr replay (LegacyScoreDecoder) and starts playback. */
+  async openReplayFile(file: File): Promise<void> {
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const decoded = decodeOsr(bytes);
+      const found = await this.findBeatmapByMD5(decoded.beatmapMD5);
+      if (!found) throw new Error("the replay's beatmap isn't imported yet. Import the beatmap first.");
+      const replay = legacyFramesToReplay(decoded);
+      const { getRuleset } = await import('../game/rulesets');
+      const ruleset = getRuleset(decoded.rulesetId);
+      const { ModSet } = await import('../game/mods/Mods');
+      const mods = new ModSet(decoded.mods).forRuleset(ruleset.shortName, ruleset.availableMods);
+      await this.ensureAudio();
+      this.select(found.set, found.entry, false);
+      const { PlayerScreen } = await import('./screens/Player');
+      this.toast(`Watching ${decoded.playerName}'s replay`);
+      this.push(new PlayerScreen(this, this.working!, ruleset, mods, replay));
+    } catch (e) {
+      this.toast(`${file.name}: ${e instanceof Error ? e.message : String(e)}`, 'error', 6000);
     }
   }
 

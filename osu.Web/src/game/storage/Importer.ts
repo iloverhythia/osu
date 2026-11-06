@@ -5,6 +5,7 @@ import { unzipSync } from 'fflate';
 import { LegacyBeatmapDecoder } from '../beatmaps/LegacyBeatmapDecoder';
 import type { Beatmap } from '../beatmaps/Beatmap';
 import { BeatmapEntry, BeatmapSetRecord, Database, hashString } from './Database';
+import { md5 } from '../replays/md5';
 
 const MIME: Record<string, string> = {
   mp3: 'audio/mpeg',
@@ -83,7 +84,8 @@ export async function createSetFromFiles(files: Record<string, Blob>, starRater?
   let onlineId = -1;
   for (const [name, blob] of Object.entries(files)) {
     if (!name.toLowerCase().endsWith('.osu')) continue;
-    const text = await blob.text();
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const text = new TextDecoder().decode(bytes);
     let beatmap: Beatmap;
     try {
       beatmap = LegacyBeatmapDecoder.decode(text);
@@ -92,6 +94,7 @@ export async function createSetFromFiles(files: Record<string, Blob>, starRater?
     }
     if (beatmap.hitObjects.length === 0) continue;
     const entry = entryFromBeatmap(name, text, beatmap);
+    entry.md5 = md5(bytes);
     if (starRater) {
       try {
         entry.stars = starRater(beatmap);

@@ -14,6 +14,10 @@ import { Database } from '../../game/storage/Database';
 import { formatNumber, h } from '../dom';
 import type { Game } from '../Game';
 import { Screen } from '../Screen';
+import type { Replay } from '../../game/replays/Replay';
+import { encodeOsr, replayToLegacyFrames } from '../../game/replays/LegacyReplay';
+import { md5 } from '../../game/replays/md5';
+import { findFile } from '../../game/storage/Importer';
 
 export interface PlayResult {
   working: WorkingBeatmap;
@@ -30,6 +34,10 @@ export interface PlayResult {
   hitEvents: HitEvent[];
   date: number;
   passed: boolean;
+  /** The recorded (or watched) replay. */
+  replay?: Replay | null;
+  /** True when these results come from watching a replay (not saved again). */
+  isReplay?: boolean;
 }
 
 /** Performance points (only implemented for osu! standard). */
@@ -79,9 +87,9 @@ export class ResultsScreen extends Screen {
 
   private async save(): Promise<void> {
     const r = this.result;
-    if (!r.passed || !r.mods.isRanked) return;
+    if (!r.passed || !r.mods.isRanked || r.isReplay) return;
     try {
-      await Database.addScore({
+      const id = await Database.addScore({
         beatmapHash: r.working.entry.hash,
         rulesetId: r.ruleset.id,
         totalScore: r.totalScore,
@@ -93,7 +101,9 @@ export class ResultsScreen extends Screen {
         date: r.date,
         pp: computePp(r),
         player: settings.get('ui.username', 'Guest'),
+        hasReplay: !!r.replay,
       });
+      if (r.replay) await Database.putReplay(id, r.replay);
     } catch {
       /* storage unavailable */
     }
@@ -149,12 +159,63 @@ export class ResultsScreen extends Screen {
           { class: 'results-actions' },
           h('button', { class: 'btn primary', onclick: () => this.retry() }, 'Retry'),
           h('button', { class: 'btn', onclick: () => this.game.back() }, 'Back to song select'),
+          r.replay && r.replay.events.length > 0 ? h('button', { class: 'btn', onclick: () => this.watchReplay() }, 'Watch replay') : null,
+          r.replay && r.replay.events.length > 0 && r.ruleset.id !== 2 ? h('button', { class: 'btn ghost', onclick: () => void this.exportOsr() }, 'Export .osr') : null,
           !r.mods.isRanked ? h('span', { style: { color: 'var(--fg-dim)', alignSelf: 'center', fontSize: '13px' } }, 'Score not saved (unranked mods)') : null,
         ),
       ),
     );
     this.el.appendChild(card);
     requestAnimationFrame(() => drawHitGraph(graph, offsets));
+  }
+
+  private async watchReplay(): Promise<void> {
+    const { PlayerScreen } = await import('./Player');
+    const r = this.result;
+    this.game.replace(new PlayerScreen(this.game, r.working, r.ruleset, r.mods, r.replay ?? null));
+  }
+
+  /** Exports the replay in osu!stable's .osr format (LegacyScoreEncoder) so it can be opened in osu! / lazer. */
+  private async exportOsr(): Promise<void> {
+    const r = this.result;
+    if (!r.replay) return;
+    try {
+      const blob = findFile(r.working.set.files, r.working.entry.filename);
+      if (!blob) throw new Error('beatmap file missing');
+      const beatmapMD5 = md5(new Uint8Array(await blob.arrayBuffer()));
+      const s = r.statistics;
+      const c = (x: HitResult) => s.get(x) ?? 0;
+      // Legacy count mapping (ScoreInfoExtensions / LegacyScoreDecoder.SetCount*): mania uses geki = Perfect, katu = Good.
+      const isMania = r.ruleset.id === 3;
+      const bytes = encodeOsr(
+        {
+          rulesetId: r.ruleset.id,
+          beatmapMD5,
+          playerName: r.replay.player,
+          count300: c(HitResult.Great),
+          count100: c(HitResult.Ok),
+          count50: c(HitResult.Meh),
+          countGeki: isMania ? c(HitResult.Perfect) : 0,
+          countKatu: isMania ? c(HitResult.Good) : 0,
+          countMiss: c(HitResult.Miss),
+          totalScore: r.totalScore,
+          maxCombo: r.maxCombo,
+          perfect: r.maxCombo === r.maximumCombo,
+          mods: r.mods.list,
+          date: r.date,
+        },
+        replayToLegacyFrames(r.replay),
+      );
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/octet-stream' }));
+      const a = document.createElement('a');
+      const e = r.working.entry;
+      a.href = url;
+      a.download = `${r.replay.player} - ${e.artist} - ${e.title} [${e.difficultyName}] (${new Date(r.date).toISOString().slice(0, 10)}).osr`.replace(/[\\/:*?"<>|]/g, '_');
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (err) {
+      this.game.toast(`Export failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
   }
 
   private async retry(): Promise<void> {

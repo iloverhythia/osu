@@ -23,6 +23,8 @@ import { h, keyLabel } from '../dom';
 import type { Game } from '../Game';
 import { Screen } from '../Screen';
 import { ResultsScreen, type PlayResult } from './Results';
+import { ReplayRecorder, type Replay } from '../../game/replays/Replay';
+import { osuPlayfieldTransform } from '../../game/rulesets/osu/playfield';
 
 const COMPLETION_DELAY = 1000;
 
@@ -77,11 +79,19 @@ export class PlayerScreen extends Screen {
   private hitWindows: { result: HitResult; length: number }[] = [];
   private loops = new Set<LoopingSample>();
 
+  // Replays
+  private recorder: ReplayRecorder | null = null;
+  private replayIndex = 0;
+  private viewW = 1;
+  private viewH = 1;
+
   constructor(
     game: Game,
     private readonly working: WorkingBeatmap,
     private readonly ruleset: Ruleset,
     private readonly mods: ModSet,
+    /** When set, the play is driven by this replay instead of user input. */
+    private readonly replay: Replay | null = null,
   ) {
     super(game, 'player');
     this.showTriangles = false;
@@ -95,6 +105,7 @@ export class PlayerScreen extends Screen {
       h('div', { class: 'meta-title' }, e.title),
       h('div', { class: 'meta-artist' }, `${e.artist} · [${e.difficultyName}]`),
       h('div', { class: 'meta-artist', style: { fontSize: '15px' } }, `mapped by ${e.creator}${mods.isEmpty ? '' : ` · ${mods.list.join(' ')}`}`),
+      replay ? h('div', { class: 'meta-artist', style: { fontSize: '15px', color: 'var(--blue)' } }, `Watching ${replay.player}'s replay`) : null,
       h('div', { class: 'spinner' }),
     );
     this.skipButton = h('button', { class: 'btn primary skip-button', style: { display: 'none' }, onclick: () => this.skip() }, 'Skip ', h('span', { class: 'kbd' }, 'Space'));
@@ -143,6 +154,7 @@ export class PlayerScreen extends Screen {
 
     this.setupProcessors();
     this.setupInput();
+    if (!this.replay && !this.mods.isAutoplay) this.recorder = new ReplayRecorder();
 
     const ctx = this.createContext();
     this.drawable = this.ruleset.createDrawableRuleset(this.playable, ctx);
@@ -350,7 +362,7 @@ export class PlayerScreen extends Screen {
   }
 
   private get inputBlocked(): boolean {
-    return !this.loaded || this.paused || this.failed || this.mods.isAutoplay;
+    return !this.loaded || this.paused || this.failed || this.mods.isAutoplay || this.replay != null;
   }
 
   private press(action: string, time: number): void {
@@ -358,6 +370,7 @@ export class PlayerScreen extends Screen {
     this.heldActions.set(action, held + 1);
     if (held === 0) {
       this.actionCounts.set(action, (this.actionCounts.get(action) ?? 0) + 1);
+      this.recorder?.press(time, action);
       this.drawable.onPressed(action, time);
     }
   }
@@ -366,11 +379,18 @@ export class PlayerScreen extends Screen {
     const held = this.heldActions.get(action) ?? 0;
     if (held <= 0) return;
     this.heldActions.set(action, held - 1);
-    if (held === 1) this.drawable.onReleased(action, time);
+    if (held === 1) {
+      this.recorder?.release(time, action);
+      this.drawable.onReleased(action, time);
+    }
   }
 
   private releaseAll(): void {
-    for (const [action, n] of this.heldActions) if (n > 0) this.drawable?.onReleased(action, this.lastFrameGameTime);
+    for (const [action, n] of this.heldActions)
+      if (n > 0) {
+        this.recorder?.release(this.lastFrameGameTime, action);
+        this.drawable?.onReleased(action, this.lastFrameGameTime);
+      }
     this.heldActions.clear();
   }
 
@@ -405,7 +425,7 @@ export class PlayerScreen extends Screen {
 
   onKeyUp(e: KeyboardEvent): boolean {
     const action = this.bindings.get(e.code);
-    if (action && this.loaded && !this.mods.isAutoplay) {
+    if (action && this.loaded && !this.mods.isAutoplay && !this.replay) {
       this.release(action, this.eventTime(e.timeStamp));
       return true;
     }
@@ -424,9 +444,11 @@ export class PlayerScreen extends Screen {
     const t = this.eventTime(e.timeStamp);
     if (e.pointerType === 'touch' || e.pointerType === 'pen') {
       this.canvas.setPointerCapture?.(e.pointerId);
+      this.recordTouch('ts', e.pointerId, p, t);
       if (this.drawable.onTouchStart) this.drawable.onTouchStart(e.pointerId, p.x, p.y, t);
       return;
     }
+    this.recordMove(p, t);
     this.drawable.onPointerMove?.(p.x, p.y, t);
     if (this.disableMouseButtons) return;
     const action = this.bindings.get(`Mouse${e.button}`);
@@ -434,21 +456,27 @@ export class PlayerScreen extends Screen {
   };
 
   private onPointerMove = (e: PointerEvent): void => {
-    if (!this.loaded || this.paused) return;
+    if (!this.loaded || this.paused || this.replay) return;
     const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [e];
     for (const ev of events.length > 0 ? events : [e]) {
       const p = this.localPos(ev);
       const t = this.eventTime(ev.timeStamp);
-      if (e.pointerType === 'touch' || e.pointerType === 'pen') this.drawable.onTouchMove?.(e.pointerId, p.x, p.y, t);
-      else this.drawable.onPointerMove?.(p.x, p.y, t);
+      if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+        this.recordTouch('tm', e.pointerId, p, t);
+        this.drawable.onTouchMove?.(e.pointerId, p.x, p.y, t);
+      } else {
+        this.recordMove(p, t);
+        this.drawable.onPointerMove?.(p.x, p.y, t);
+      }
     }
   };
 
   private onPointerUp = (e: PointerEvent): void => {
-    if (!this.loaded) return;
+    if (!this.loaded || this.replay) return;
     const p = this.localPos(e);
     const t = this.eventTime(e.timeStamp);
     if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+      this.recordTouch('te', e.pointerId, p, t);
       this.drawable.onTouchEnd?.(e.pointerId, p.x, p.y, t);
       return;
     }
@@ -457,9 +485,67 @@ export class PlayerScreen extends Screen {
     if (action) this.release(action, t);
   };
 
+  // ------------------------------------------------------------------ replays
+
+  /** osu! replays store cursor positions in playfield coordinates (like osu!stable); other rulesets use screen fractions. */
+  private get replaySpace(): 'gamefield' | 'screen' {
+    return this.ruleset.id === 0 ? 'gamefield' : 'screen';
+  }
+
+  private recordMove(p: { x: number; y: number }, t: number): void {
+    if (!this.recorder) return;
+    if (this.replaySpace === 'gamefield') {
+      const tr = osuPlayfieldTransform(this.viewW, this.viewH);
+      this.recorder.move(t, (p.x - tr.offsetX) / tr.scale, (p.y - tr.offsetY) / tr.scale);
+    } else this.recorder.move(t, p.x / this.viewW, p.y / this.viewH);
+  }
+
+  private recordTouch(k: 'ts' | 'tm' | 'te', id: number, p: { x: number; y: number }, t: number): void {
+    // Touches also move the osu! cursor, so record them in the ruleset's space alongside the touch itself.
+    this.recorder?.touch(t, k, id, p.x / this.viewW, p.y / this.viewH);
+  }
+
+  /** Feeds replay events up to `time` into the ruleset. */
+  private playReplayTo(time: number): void {
+    const replay = this.replay;
+    if (!replay) return;
+    const ev = replay.events;
+    while (this.replayIndex < ev.length && ev[this.replayIndex].t <= time) {
+      const e = ev[this.replayIndex++];
+      switch (e.k) {
+        case 'p':
+          this.press(e.a, e.t);
+          break;
+        case 'r':
+          this.release(e.a, e.t);
+          break;
+        case 'm': {
+          let x = e.x * this.viewW;
+          let y = e.y * this.viewH;
+          if (replay.space === 'gamefield') {
+            const tr = osuPlayfieldTransform(this.viewW, this.viewH);
+            x = tr.offsetX + e.x * tr.scale;
+            y = tr.offsetY + e.y * tr.scale;
+          }
+          this.drawable.onPointerMove?.(x, y, e.t);
+          break;
+        }
+        case 'ts':
+          this.drawable.onTouchStart?.(e.id, e.x * this.viewW, e.y * this.viewH, e.t);
+          break;
+        case 'tm':
+          this.drawable.onTouchMove?.(e.id, e.x * this.viewW, e.y * this.viewH, e.t);
+          break;
+        case 'te':
+          this.drawable.onTouchEnd?.(e.id, e.x * this.viewW, e.y * this.viewH, e.t);
+          break;
+      }
+    }
+  }
+
   private onBlur = (): void => {
     if (document.visibilityState === 'hidden' || !document.hasFocus()) {
-      if (this.loaded && !this.paused && !this.failed && !this.resultsShown && !this.mods.isAutoplay) this.pause();
+      if (this.loaded && !this.paused && !this.failed && !this.resultsShown && !this.mods.isAutoplay && !this.replay) this.pause();
     }
   };
 
@@ -469,6 +555,8 @@ export class PlayerScreen extends Screen {
     const hgt = this.canvas.clientHeight || window.innerHeight;
     this.canvas.width = Math.round(w * dpr);
     this.canvas.height = Math.round(hgt * dpr);
+    this.viewW = w;
+    this.viewH = hgt;
   };
 
   // ------------------------------------------------------------------ flow
@@ -512,13 +600,13 @@ export class PlayerScreen extends Screen {
       this.resume();
       return false;
     }
-    if (this.mods.isAutoplay) return true;
+    if (this.mods.isAutoplay || this.replay) return true;
     this.pause();
     return false;
   }
 
   private retry(): void {
-    this.game.replace(new PlayerScreen(this.game, this.working, this.ruleset, this.mods));
+    this.game.replace(new PlayerScreen(this.game, this.working, this.ruleset, this.mods, this.replay));
   }
 
   private quit(): void {
@@ -585,6 +673,10 @@ export class PlayerScreen extends Screen {
       hitEvents: [...sp.hitEvents],
       date: Date.now(),
       passed: !this.failed,
+      replay: this.recorder
+        ? { rulesetId: this.ruleset.id, space: this.replaySpace, events: this.recorder.events, player: settings.get('ui.username', 'Guest'), mods: this.mods.list }
+        : this.replay,
+      isReplay: this.replay != null,
     };
     this.game.replace(new ResultsScreen(this.game, result));
   }
@@ -624,6 +716,7 @@ export class PlayerScreen extends Screen {
     this.lastFrameGameTime = time;
 
     if (!this.paused && !this.failed) {
+      this.playReplayTo(time);
       this.drawable.update(time, elapsed);
       this.healthProcessor.update(time, elapsed);
       if (this.skipTarget != null) {
@@ -810,12 +903,12 @@ export class PlayerScreen extends Screen {
       }
     }
 
-    if (this.mods.isAutoplay) {
+    if (this.mods.isAutoplay || this.replay) {
       g.textAlign = 'center';
       g.textBaseline = 'top';
       g.font = `700 ${Math.round(16 * ui)}px ${font}`;
       g.fillStyle = 'rgba(255,255,255,0.6)';
-      g.fillText('AUTOPLAY', w / 2, 14);
+      g.fillText(this.replay ? `REPLAY · ${this.replay.player.toUpperCase()}` : 'AUTOPLAY', w / 2, 14);
     }
   }
 
