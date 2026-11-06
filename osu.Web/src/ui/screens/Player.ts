@@ -870,7 +870,7 @@ export class PlayerScreen extends Screen {
     g.fillStyle = 'rgba(0,0,0,0.4)';
     roundRect(g, 16, 16, barW, 10 * ui, 5 * ui);
     g.fill();
-    g.fillStyle = hp < 0.3 ? '#ff5a5a' : '#7b61ff';
+    g.fillStyle = hp < 0.3 ? '#ff5a5a' : '#9b30ff';
     roundRect(g, 16, 16, Math.max(0, barW * hp), 10 * ui, 5 * ui);
     g.fill();
 
@@ -945,7 +945,7 @@ export class PlayerScreen extends Screen {
       g.textBaseline = 'middle';
       for (const a of this.actions) {
         const held = (this.heldActions.get(a.id) ?? 0) > 0;
-        g.fillStyle = held ? '#7b61ff' : 'rgba(0,0,0,0.45)';
+        g.fillStyle = held ? '#9b30ff' : 'rgba(0,0,0,0.45)';
         roundRect(g, x, y, size, size, 8);
         g.fill();
         g.fillStyle = '#fff';

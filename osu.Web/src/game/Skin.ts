@@ -22,8 +22,8 @@ export function darken(c: RGB, amount: number): RGB {
 
 export const COLOURS = {
   // Accent (cursor, highlights). Named `pink` for historical reasons.
-  pink: '#7b61ff',
-  pinkDark: '#5f48d9',
+  pink: '#9b30ff',
+  pinkDark: '#7a1fd6',
   blue: '#66ccff',
   yellow: '#ffcc22',
   green: '#88b300',
