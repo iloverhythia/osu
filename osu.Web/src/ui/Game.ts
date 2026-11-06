@@ -9,7 +9,7 @@ import { BeatmapLibrary } from '../game/BeatmapLibrary';
 import { ModSet } from '../game/mods/Mods';
 import { getRuleset } from '../game/rulesets';
 import type { Ruleset } from '../game/rulesets/Ruleset';
-import type { BeatmapEntry, BeatmapSetRecord } from '../game/storage/Database';
+import { Database, type BeatmapEntry, type BeatmapSetRecord } from '../game/storage/Database';
 import { importFiles } from '../game/storage/Importer';
 import { importSkin } from '../game/skinning';
 import { decodeOsr, legacyFramesToReplay } from '../game/replays/LegacyReplay';
@@ -94,6 +94,7 @@ export class Game {
     settings.subscribe(key => {
       if (key.startsWith('audio.')) this.applyVolumes();
     });
+    this.library.subscribe(() => this.scheduleStarBackfill());
   }
 
   // ------------------------------------------------------------------ audio
@@ -352,6 +353,34 @@ export class Game {
 
   openFolderPicker(): void {
     this.folderInput.click();
+  }
+
+  private backfillScheduled = false;
+
+  /** Computes missing nomod star ratings in the background (e.g. the generated demo set, or sets imported before ratings existed). */
+  private scheduleStarBackfill(): void {
+    if (this.backfillScheduled) return;
+    this.backfillScheduled = true;
+    const idle = (cb: () => void) => ((window as Window & { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 50)))(cb);
+    const step = async () => {
+      for (const set of this.library.sets) {
+        const entry = set.beatmaps.find(b => b.stars === undefined);
+        if (!entry) continue;
+        try {
+          const blob = (await import('../game/storage/Importer')).findFile(set.files, entry.filename);
+          const { LegacyBeatmapDecoder } = await import('../game/beatmaps/LegacyBeatmapDecoder');
+          entry.stars = blob ? this.starRater(LegacyBeatmapDecoder.decode(await blob.text())) : 0;
+        } catch {
+          entry.stars = 0;
+        }
+        if (set.beatmaps.every(b => b.stars !== undefined) && !set.builtIn) void Database.putSet(set).catch(() => undefined);
+        idle(() => void step());
+        return;
+      }
+      this.backfillScheduled = false;
+      this.emit();
+    };
+    idle(() => void step());
   }
 
   /** Star rating for a native (nomod) beatmap, used when importing. */
