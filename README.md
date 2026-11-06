@@ -39,6 +39,10 @@ If your platform is unsupported or not listed above, there is still a chance you
 
 **For iOS/iPadOS users**: The iOS testflight link fills up very fast (Apple has a hard limit of 10,000 users). We reset it occasionally. Please do not ask about this. Check back regularly for link resets or follow [peppy](https://twitter.com/ppy) on twitter for announcements. Our goal is to get the game on mobile app stores very soon so we don't have to live with this limitation.
 
+### In the browser
+
+[`osu.Web`](osu.Web/README.md) is a TypeScript port of the gameplay (all four rulesets, difficulty/pp, replays, mods) that runs in a web browser. See its README for how to run and deploy it.
+
 ## Developing a custom ruleset
 
 osu! is designed to allow user-created gameplay variations, called "rulesets". Building one of these allows a developer to harness the power of the osu! beatmap library, game engine, and general UX for a new style of gameplay. To get started working on a ruleset, we have some templates available [here](https://github.com/ppy/osu/tree/master/Templates).
