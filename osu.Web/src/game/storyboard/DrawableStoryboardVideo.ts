@@ -32,6 +32,7 @@ export class DrawableStoryboardVideo {
   private duration = NaN;
   private failed = false;
   private fadesApplied = false;
+  private fadeOutApplied = false;
   private lastSeek = -Infinity;
   private playRequested = false;
   /**
@@ -80,6 +81,13 @@ export class DrawableStoryboardVideo {
         },
         { once: true },
       );
+      // Some files (e.g. MediaRecorder output) only report a finite duration later.
+      el.addEventListener('durationchange', () => {
+        if (!Number.isFinite(this.duration) && Number.isFinite(el.duration)) {
+          this.duration = el.duration * 1000;
+          this.applyFades();
+        }
+      });
       el.addEventListener(
         'error',
         () => {
@@ -94,20 +102,21 @@ export class DrawableStoryboardVideo {
 
   /** DrawableStoryboardVideo.LoadComplete: fade in at the start time, fade out over the last 500ms of the video. */
   private applyFades(): void {
-    if (this.fadesApplied || !Number.isFinite(this.duration)) return;
-    this.fadesApplied = true;
-    const tl = this.timeline;
-    const alpha = tl.props[Prop.Alpha]!;
+    const alpha = this.timeline.props[Prop.Alpha]!;
     const start = this.video.startTime;
     const scratch = new Float64Array(3);
     const valueAt = (t: number): number => (alpha.evaluate(t, scratch) ? scratch[0] : alpha.initial[0]);
 
     // Transforms added here get greater TransformIDs than the commands, and remove any alpha commands starting after them.
-    const fadeIn = { start, end: start + 500, easing: 0, a0: valueAt(start), a1: 0, a2: 0, b0: 1, b1: 0, b2: 0, id: 1e9 };
-    alpha.addDynamic(fadeIn, -Infinity);
-    const fadeOutStart = start + this.duration - 500;
-    const fadeOut = { start: fadeOutStart, end: fadeOutStart + 500, easing: 0, a0: valueAt(fadeOutStart), a1: 0, a2: 0, b0: 0, b1: 0, b2: 0, id: 1e9 + 2 };
-    alpha.addDynamic(fadeOut, -Infinity);
+    if (!this.fadesApplied) {
+      this.fadesApplied = true;
+      alpha.addDynamic({ start, end: start + 500, easing: 0, a0: valueAt(start), a1: 0, a2: 0, b0: 1, b1: 0, b2: 0, id: 1e9 }, -Infinity);
+    }
+    if (!this.fadeOutApplied && Number.isFinite(this.duration)) {
+      this.fadeOutApplied = true;
+      const fadeOutStart = start + this.duration - 500;
+      alpha.addDynamic({ start: fadeOutStart, end: fadeOutStart + 500, easing: 0, a0: valueAt(fadeOutStart), a1: 0, a2: 0, b0: 0, b1: 0, b2: 0, id: 1e9 + 2 }, -Infinity);
+    }
   }
 
   /** Keeps the element's playback in sync with the gameplay clock (Video.PlaybackPosition = Time.Current - Video.StartTime). */
@@ -115,7 +124,7 @@ export class DrawableStoryboardVideo {
     if (this.failed || !this.fadesApplied) return;
     const el = this.element;
     const position = (time - this.video.startTime) / 1000;
-    const durationSec = this.duration / 1000;
+    const durationSec = Number.isFinite(this.duration) ? this.duration / 1000 : Infinity;
 
     if (position < 0 || position >= durationSec) {
       if (!el.paused) el.pause();
@@ -149,7 +158,8 @@ export class DrawableStoryboardVideo {
 
     if (Math.abs(drift) > (running ? SEEK_THRESHOLD : 0.03) && !el.seeking && performance.now() - this.lastSeek > SEEK_COOLDOWN) {
       // when playing, aim slightly ahead to account for the seek itself taking time
-      el.currentTime = Math.min(durationSec, position + (running ? 0.05 * rate : 0));
+      const target = position + (running ? 0.05 * rate : 0);
+      el.currentTime = target < durationSec ? target : position;
       this.lastSeek = performance.now();
     }
   }

@@ -134,6 +134,8 @@ export class PropertyTimeline {
 
   hasInitial = false;
   readonly initial = new Float64Array(3);
+  /** Set by `evaluate`: whether the value is currently being interpolated between two different values. */
+  tweening = false;
 
   constructor(readonly prop: Prop) {}
 
@@ -184,6 +186,7 @@ export class PropertyTimeline {
       }
     }
 
+    this.tweening = false;
     if (best === null) return false;
 
     const t = time - shift;
@@ -194,6 +197,7 @@ export class PropertyTimeline {
       return true;
     }
 
+    this.tweening = best.a0 !== best.b0 || best.a1 !== best.b1 || best.a2 !== best.b2;
     switch (this.prop) {
       case Prop.Colour:
         valueAtColour(t, best.a0, best.a1, best.a2, best.b0, best.b1, best.b2, best.start, best.end, best.easing, out);
@@ -251,6 +255,8 @@ export class SpriteState {
   g = 1;
   b = 1;
   alpha = 1;
+  /** Whether the colour is mid-fade (changing every frame), which makes caching tinted textures pointless. */
+  colourAnimating = false;
   additive = false;
   flipH = false;
   flipV = false;
@@ -356,9 +362,11 @@ export class SpriteTimeline {
 
   private evalColour(time: number, state: SpriteState): void {
     const tl = this.props[Prop.Colour];
+    state.colourAnimating = false;
     if (!tl) {
       state.r = state.g = state.b = 1;
     } else if (tl.evaluate(time, scratch)) {
+      state.colourAnimating = tl.tweening;
       state.r = scratch[0];
       state.g = scratch[1];
       state.b = scratch[2];

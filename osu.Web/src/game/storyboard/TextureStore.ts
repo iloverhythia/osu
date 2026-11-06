@@ -22,6 +22,11 @@ export class StoryboardTexture {
    * filled rectangle, which makes tinting free. Unpremultiplied r, g, b, a in 0..1.
    */
   solid: Float32Array | null = null;
+  /**
+   * Lazily built per-channel copies (black silhouette, red-only, green-only, blue-only, each with the texture's alpha) used to draw
+   * colour fades exactly without creating a tinted copy per frame: tint(c) = silhouette erase + Σ channel_i · c_i (additively).
+   */
+  channels: (OffscreenCanvas | HTMLCanvasElement)[] | null = null;
   /** The latest time any element using this texture is displayed until (used for eviction). */
   lastUseEnd = -Infinity;
 
@@ -169,6 +174,7 @@ export class StoryboardTextureStore {
   private release(tex: StoryboardTexture): void {
     tex.bitmap?.close();
     tex.bitmap = null;
+    tex.channels = null;
     tex.state = TextureState.None;
     for (const [key, entry] of this.tintCache) {
       if (Math.floor(key / 16777216) === tex.id) {
@@ -217,6 +223,38 @@ export class StoryboardTextureStore {
     return canvas;
   }
 
+  /** The per-channel decomposition of a texture (see `StoryboardTexture.channels`), or null if it can't be built. */
+  getChannels(tex: StoryboardTexture): (OffscreenCanvas | HTMLCanvasElement)[] | null {
+    if (tex.channels) return tex.channels;
+    const bitmap = tex.bitmap;
+    const w = tex.width;
+    const h = tex.height;
+    if (!bitmap || w * h > 4096 * 4096) return null;
+    try {
+      const src = createCanvas(w, h);
+      const sx = src.getContext('2d', { willReadFrequently: true } as CanvasRenderingContext2DSettings) as Canvas2D | null;
+      if (!sx) return null;
+      sx.drawImage(bitmap, 0, 0);
+      const data = sx.getImageData(0, 0, w, h).data;
+      const result: (OffscreenCanvas | HTMLCanvasElement)[] = [];
+      for (let channel = -1; channel < 3; channel++) {
+        const img = new ImageData(w, h);
+        const out = img.data;
+        for (let i = 0; i < data.length; i += 4) {
+          if (channel >= 0) out[i + channel] = data[i + channel];
+          out[i + 3] = data[i + 3];
+        }
+        const c = createCanvas(w, h);
+        (c.getContext('2d') as Canvas2D).putImageData(img, 0, 0);
+        result.push(c);
+      }
+      tex.channels = result;
+      return result;
+    } catch {
+      return null;
+    }
+  }
+
   /** Cached `rgb(r,g,b)` strings (0..255 ints) to avoid per-frame string allocation. */
   fillStyle(r: number, g: number, b: number): string {
     const key = (r << 16) | (g << 8) | b;
@@ -234,6 +272,7 @@ export class StoryboardTextureStore {
     for (const tex of this.textures) {
       tex.bitmap?.close();
       tex.bitmap = null;
+      tex.channels = null;
       tex.state = TextureState.None;
     }
     this.queue.length = 0;

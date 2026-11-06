@@ -1,6 +1,7 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // Gameplay for osu! standard. Ports the judging logic of DrawableHitCircle, DrawableSlider (+ SliderInputManager),
 // DrawableSpinner (+ SpinnerRotationTracker), StartTimeOrderedHitPolicy and OsuAutoGenerator, with a procedural renderer.
+// When a legacy skin (.osk / beatmap skin) provides elements, they are drawn by OsuLegacySkinRenderer (legacySkin.ts) instead.
 
 import type { HitSampleInfo } from '../../audio/HitSampleInfo';
 import { Vec2, clamp, distanceSq } from '../../../framework/math';
@@ -8,6 +9,9 @@ import { HitResult, isHit } from '../../scoring/HitResult';
 import type { DrawableRuleset, GameplayContext, LoopHandle } from '../Ruleset';
 import { RGB, darken, lighten, rgb, COLOURS } from '../../Skin';
 import type { OsuPlayableBeatmap } from './beatmap';
+import { OsuLegacySkinRenderer, type OsuLegacyHost } from './legacySkin';
+import { osuPlayfieldTransform } from './playfield';
+import { resolveComboColours } from '../../skinning/SkinSource';
 import {
   HitCircle,
   OsuHitObject,
@@ -20,6 +24,7 @@ import {
   SliderTick,
   Spinner,
   SpinnerBonusTick,
+  SpinnerTick,
 } from './objects';
 
 const FOLLOW_AREA = 2.4;
@@ -100,6 +105,10 @@ export class DrawableOsuRuleset implements DrawableRuleset {
   private readonly showCursorTrail: boolean;
   private readonly hitLighting: boolean;
   private readonly bodyCache = new Map<Slider, Vec2[]>();
+  /** Combo colours in effect (beatmap, then skin, then default). */
+  private readonly comboColours: RGB[];
+  /** Legacy skin renderer, when a user / beatmap skin is in use. */
+  private readonly legacy: OsuLegacySkinRenderer | null = null;
 
   constructor(
     private readonly playable: OsuPlayableBeatmap,
@@ -116,6 +125,7 @@ export class DrawableOsuRuleset implements DrawableRuleset {
     this.showFollowPoints = ctx.settings.get('osu.followPoints', true);
     this.showCursorTrail = ctx.settings.get('osu.cursorTrail', true);
     this.hitLighting = ctx.settings.get('osu.hitLighting', true);
+    this.comboColours = resolveComboColours(ctx.skin);
 
     for (const h of this.objects) {
       this.judge.set(h, { judged: false, result: HitResult.None, judgedAt: 0 });
@@ -135,6 +145,25 @@ export class DrawableOsuRuleset implements DrawableRuleset {
     }
 
     if (ctx.autoplay || this.relax || this.autopilot) this.generateAutoEvents();
+
+    if (ctx.skin.sources && ctx.skin.sources.length > 0) {
+      const self = this;
+      const host: OsuLegacyHost = {
+        judge: h => self.judge.get(h)!,
+        sliderTracking: s => self.sliderStates.get(s)!,
+        spinner: s => {
+          const st = self.spinnerStates.get(s)!;
+          return { displayRotation: st.displayRotation, completedFullSpins: st.completedFullSpins, rpm: st.rpm, progress: self.progress(s, st) };
+        },
+        comboColour: h => self.comboColour(h),
+        hiddenAlpha: (h, time, parent) => self.hiddenAlpha(h, time, parent),
+        hidden: this.hidden,
+        hitLighting: this.hitLighting,
+        snakingIn: ctx.settings.get('osu.snakingIn', true),
+        snakingOut: ctx.settings.get('osu.snakingOut', true),
+      };
+      this.legacy = new OsuLegacySkinRenderer(ctx.skin.sources, host, ctx, playable.source.controlPoints, this.objects);
+    }
   }
 
   get leadInTime(): number {
@@ -281,6 +310,14 @@ export class DrawableOsuRuleset implements DrawableRuleset {
       } else if (!(h instanceof Spinner) && !(h instanceof Slider) && h.samples.length > 0) {
         this.ctx.playSamples(h.samples, { pan });
       }
+    }
+
+    // Legacy skin judgements (DrawableOsuJudgement), slider follow circle reactions and hit lighting.
+    const parentSlider = parent instanceof Slider ? parent : null;
+    if (this.legacy) {
+      this.legacy.onResult(h, type, s.judgedAt, parentSlider);
+      const displayed = !(h instanceof Slider) && !(h instanceof SpinnerTick);
+      if (displayed && this.legacy.handlesJudgement(type)) return;
     }
 
     // Judgement popups for main objects.
@@ -512,7 +549,8 @@ export class DrawableOsuRuleset implements DrawableRuleset {
       st.spinLoop.stop();
       st.spinLoop = null;
     }
-    if (st.spinLoop) st.spinLoop.setRate(Math.min(1.6, 0.5 + this.progress(spinner, st) * 0.5));
+    // SpinnerFrequencyModulate (skin.ini) disables the pitch change.
+    if (st.spinLoop) st.spinLoop.setRate(this.legacy && !this.legacy.spinnerFrequencyModulate ? 1 : Math.min(1.6, 0.5 + this.progress(spinner, st) * 0.5));
 
     // CheckForResult
     if (time < spinner.startTime || s.judged) return;
@@ -632,16 +670,23 @@ export class DrawableOsuRuleset implements DrawableRuleset {
 
   render(g: CanvasRenderingContext2D, width: number, height: number, time: number): void {
     // OsuPlayfieldAdjustmentContainer: 4:3 playfield taking 80% of the available space, shifted down slightly like stable.
-    const scale = Math.min((width * 0.8) / PLAYFIELD_WIDTH, (height * 0.8) / PLAYFIELD_HEIGHT);
+    const transform = osuPlayfieldTransform(width, height);
+    const scale = transform.scale;
     this.scale = scale;
-    this.offsetX = (width - PLAYFIELD_WIDTH * scale) / 2;
-    this.offsetY = (height - PLAYFIELD_HEIGHT * scale) / 2 + 8 * scale;
+    this.offsetX = transform.offsetX;
+    this.offsetY = transform.offsetY;
 
     g.save();
     g.translate(this.offsetX, this.offsetY);
     g.scale(scale, scale);
 
-    if (this.showFollowPoints) this.drawFollowPoints(g, time);
+    const L = this.legacy;
+    if (this.showFollowPoints) {
+      if (L?.has.followPoint) L.drawFollowPoints(g, time, this.firstActiveIndex);
+      else this.drawFollowPoints(g, time);
+    }
+    // judgementLayer (hit lighting, new-style judgements) is below the hit objects.
+    L?.drawJudgementsBelow(g, time);
 
     // Later objects are drawn below earlier ones.
     let last = this.firstActiveIndex;
@@ -649,40 +694,58 @@ export class DrawableOsuRuleset implements DrawableRuleset {
     for (let i = last - 1; i >= this.firstActiveIndex; i--) {
       const h = this.objects[i];
       if (h instanceof Slider) this.drawSlider(g, h, time);
-      else if (h instanceof Spinner) this.drawSpinner(g, h, time);
-      else if (h instanceof HitCircle) this.drawCircleObject(g, h, time, true);
+      else if (h instanceof Spinner) {
+        if (L?.has.spinner) L.drawSpinner(g, h, time);
+        else this.drawSpinner(g, h, time);
+      } else if (h instanceof HitCircle) this.drawCircleObject(g, h, time, true);
     }
+    // judgementAboveHitObjectLayer (old-style legacy judgements).
+    L?.drawJudgementsAbove(g, time);
     // Approach circles go above everything (separate layer in lazer).
     if (!this.hidden) {
       for (let i = last - 1; i >= this.firstActiveIndex; i--) {
         const h = this.objects[i];
         const c = h instanceof HitCircle ? h : h instanceof Slider ? h.headCircle : null;
-        if (c) this.drawApproachCircle(g, c, h, time);
+        if (!c) continue;
+        if (L?.has.approachCircle) L.drawApproachCircle(g, c, h, time);
+        else this.drawApproachCircle(g, c, h, time);
       }
     }
     this.drawPopups(g, time);
     g.restore();
 
     if (this.flashlight) this.drawFlashlight(g, width, height, time);
-    this.drawCursor(g, time);
+    if (L && (L.has.cursor || L.has.cursorTrail)) {
+      L.drawCursor(g, this.cursor.x, this.cursor.y, this.pressed.size > 0, time, this.scale, this.offsetX, this.offsetY, this.cursorSize, this.showCursorTrail, this.cursorSize);
+      if (!L.has.cursor) this.drawCursor(g, time, false);
+    } else this.drawCursor(g, time, true);
   }
 
   private comboColour(h: OsuHitObject): RGB {
-    return this.ctx.skin.comboColour(h.comboIndexWithOffsets);
+    const colours = this.comboColours;
+    const i = h.comboIndexWithOffsets;
+    return colours[((i % colours.length) + colours.length) % colours.length];
   }
 
   private alphaFor(h: OsuHitObject, time: number, parent: OsuHitObject = h): number {
     const appear = h.startTime - h.timePreempt;
-    let a = clamp((time - appear) / Math.max(1, h.timeFadeIn), 0, 1);
-    if (this.hidden) {
-      const fadeOutStart = h.startTime - h.timePreempt + h.timeFadeIn;
-      const duration = parent instanceof Slider && h === parent ? parent.endTime - fadeOutStart : h.timePreempt * HD_FADE_OUT;
-      a *= 1 - clamp((time - fadeOutStart) / Math.max(1, duration), 0, 1);
-    }
-    return a;
+    const a = clamp((time - appear) / Math.max(1, h.timeFadeIn), 0, 1);
+    return a * this.hiddenAlpha(h, time, parent);
+  }
+
+  /** The Hidden mod's fade-out factor (1 without Hidden). */
+  private hiddenAlpha(h: OsuHitObject, time: number, parent: OsuHitObject = h): number {
+    if (!this.hidden) return 1;
+    const fadeOutStart = h.startTime - h.timePreempt + h.timeFadeIn;
+    const duration = parent instanceof Slider && h === parent ? parent.endTime - fadeOutStart : h.timePreempt * HD_FADE_OUT;
+    return 1 - clamp((time - fadeOutStart) / Math.max(1, duration), 0, 1);
   }
 
   private drawCircleObject(g: CanvasRenderingContext2D, c: HitCircle, time: number, showNumber: boolean, parentForColour?: OsuHitObject): void {
+    if (this.legacy?.has.hitCircle) {
+      this.legacy.drawHitCircle(g, c, time, 'all', parentForColour ?? c);
+      return;
+    }
     const s = this.judge.get(c)!;
     const colourSource = parentForColour ?? c;
     const colour = this.comboColour(colourSource);
@@ -699,7 +762,7 @@ export class DrawableOsuRuleset implements DrawableRuleset {
         if (since > d) return;
         alpha = 1 - since / d;
         scale = 1 + 0.4 * (since / d);
-        if (this.hitLighting && since < 120) {
+        if (this.hitLighting && since < 120 && !this.legacy?.has.lighting) {
           g.globalAlpha = (1 - since / 120) * 0.5;
           g.fillStyle = rgb(lighten(colour, 0.4));
           g.beginPath();
@@ -758,7 +821,6 @@ export class DrawableOsuRuleset implements DrawableRuleset {
     const colour = this.comboColour(slider);
     const r = slider.radius;
     const stacked = slider.stackedPosition;
-    const ss = this.sliderStates.get(slider)!;
 
     let alpha = this.alphaFor(slider, time, slider);
     // Fade out after the slider ends.
@@ -779,6 +841,19 @@ export class DrawableOsuRuleset implements DrawableRuleset {
         if (span % 2 === 1) p1 = pathProgress;
         else p0 = pathProgress;
       }
+    }
+
+    // Legacy skin providing "hitcircle": LegacySliderBody, end circles, reverse arrows, head (+ ball / ticks when provided).
+    const L = this.legacy;
+    if (L?.has.hitCircle) {
+      const bodyAlpha = this.alphaFor(slider, time, slider);
+      const points = bodyAlpha > 0 ? (p0 === 0 && p1 === 1 ? this.sliderBody(slider) : slider.path.getPathToProgress(p0, p1)) : [];
+      L.drawSlider(g, slider, time, { points, alpha: bodyAlpha }, {
+        ticks: () => this.drawSliderTicks(g, slider, time, alpha, colour),
+        follow: () => this.drawProceduralFollowCircle(g, slider, time, colour),
+        ball: () => this.drawProceduralSliderBall(g, slider, time, colour),
+      });
+      return;
     }
 
     if (alpha > 0) {
@@ -810,22 +885,8 @@ export class DrawableOsuRuleset implements DrawableRuleset {
     }
 
     // Ticks
-    for (const t of slider.ticks) {
-      const ts = this.judge.get(t)!;
-      if (ts.judged) continue;
-      const a = clamp((time - (t.startTime - t.timePreempt)) / 150, 0, 1) * (this.hidden ? alpha : 1);
-      if (a <= 0) continue;
-      const p = t.stackedPosition;
-      g.globalAlpha = a;
-      g.fillStyle = '#fff';
-      g.beginPath();
-      g.arc(p.x, p.y, r * 0.13, 0, Math.PI * 2);
-      g.fill();
-      g.strokeStyle = rgb(colour);
-      g.lineWidth = r * 0.04;
-      g.stroke();
-    }
-    g.globalAlpha = 1;
+    if (L?.has.sliderScorePoint) L.drawSliderTicks(g, slider, time);
+    else this.drawSliderTicks(g, slider, time, alpha, colour);
 
     // Tail circle (drawn under head).
     const tail = slider.tailCircle;
@@ -874,37 +935,80 @@ export class DrawableOsuRuleset implements DrawableRuleset {
     // Head circle
     this.drawCircleObject(g, slider.headCircle, time, true, slider);
 
-    // Slider ball + follow circle
-    if (time >= slider.startTime && time <= slider.endTime + 150) {
-      const progress = this.sliderProgress(slider, time);
-      const pos = slider.stackedPositionAt(progress);
-      const ballAlpha = time > slider.endTime ? 1 - (time - slider.endTime) / 150 : 1;
-      g.globalAlpha = ballAlpha;
-      g.fillStyle = rgb(lighten(colour, 0.25));
-      g.beginPath();
-      g.arc(pos.x, pos.y, r * 0.82, 0, Math.PI * 2);
-      g.fill();
-      g.strokeStyle = '#fff';
-      g.lineWidth = r * 0.12;
-      g.stroke();
-
-      const sinceChange = time - ss.lastTrackingChange;
-      const followT = clamp(sinceChange / 180, 0, 1);
-      const followScale = ss.tracking ? 1 + (FOLLOW_AREA - 1) * (1 - Math.pow(1 - followT, 3)) : FOLLOW_AREA - (FOLLOW_AREA - 1) * followT;
-      const followAlpha = ss.tracking ? followT : 1 - followT;
-      if (followAlpha > 0) {
-        g.globalAlpha = followAlpha * ballAlpha * 0.9;
-        g.strokeStyle = rgb(lighten(colour, 0.5));
-        g.lineWidth = r * 0.1;
-        g.beginPath();
-        g.arc(pos.x, pos.y, r * followScale, 0, Math.PI * 2);
-        g.stroke();
-        g.globalAlpha *= 0.15;
-        g.fillStyle = rgb(colour);
-        g.fill();
-      }
-      g.globalAlpha = 1;
+    // Slider ball + follow circle (legacy pieces when a skin provides "sliderb" / "sliderfollowcircle").
+    if (L && (L.has.sliderBall || L.has.followCircle)) {
+      L.drawBallAndFollowCircle(
+        g,
+        slider,
+        time,
+        1,
+        () => this.drawProceduralFollowCircle(g, slider, time, colour),
+        () => this.drawProceduralSliderBall(g, slider, time, colour),
+      );
+    } else {
+      this.drawProceduralSliderBall(g, slider, time, colour);
+      this.drawProceduralFollowCircle(g, slider, time, colour);
     }
+  }
+
+  private drawSliderTicks(g: CanvasRenderingContext2D, slider: Slider, time: number, alpha: number, colour: RGB): void {
+    const r = slider.radius;
+    for (const t of slider.ticks) {
+      const ts = this.judge.get(t)!;
+      if (ts.judged) continue;
+      const a = clamp((time - (t.startTime - t.timePreempt)) / 150, 0, 1) * (this.hidden ? alpha : 1);
+      if (a <= 0) continue;
+      const p = t.stackedPosition;
+      g.globalAlpha = a;
+      g.fillStyle = '#fff';
+      g.beginPath();
+      g.arc(p.x, p.y, r * 0.13, 0, Math.PI * 2);
+      g.fill();
+      g.strokeStyle = rgb(colour);
+      g.lineWidth = r * 0.04;
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+  }
+
+  private drawProceduralSliderBall(g: CanvasRenderingContext2D, slider: Slider, time: number, colour: RGB): void {
+    if (time < slider.startTime || time > slider.endTime + 150) return;
+    const r = slider.radius;
+    const pos = slider.stackedPositionAt(this.sliderProgress(slider, time));
+    const ballAlpha = time > slider.endTime ? 1 - (time - slider.endTime) / 150 : 1;
+    g.globalAlpha = ballAlpha;
+    g.fillStyle = rgb(lighten(colour, 0.25));
+    g.beginPath();
+    g.arc(pos.x, pos.y, r * 0.82, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = '#fff';
+    g.lineWidth = r * 0.12;
+    g.stroke();
+    g.globalAlpha = 1;
+  }
+
+  private drawProceduralFollowCircle(g: CanvasRenderingContext2D, slider: Slider, time: number, colour: RGB): void {
+    if (time < slider.startTime || time > slider.endTime + 150) return;
+    const r = slider.radius;
+    const ss = this.sliderStates.get(slider)!;
+    const pos = slider.stackedPositionAt(this.sliderProgress(slider, time));
+    const ballAlpha = time > slider.endTime ? 1 - (time - slider.endTime) / 150 : 1;
+    const sinceChange = time - ss.lastTrackingChange;
+    const followT = clamp(sinceChange / 180, 0, 1);
+    const followScale = ss.tracking ? 1 + (FOLLOW_AREA - 1) * (1 - Math.pow(1 - followT, 3)) : FOLLOW_AREA - (FOLLOW_AREA - 1) * followT;
+    const followAlpha = ss.tracking ? followT : 1 - followT;
+    if (followAlpha > 0) {
+      g.globalAlpha = followAlpha * ballAlpha * 0.9;
+      g.strokeStyle = rgb(lighten(colour, 0.5));
+      g.lineWidth = r * 0.1;
+      g.beginPath();
+      g.arc(pos.x, pos.y, r * followScale, 0, Math.PI * 2);
+      g.stroke();
+      g.globalAlpha *= 0.15;
+      g.fillStyle = rgb(colour);
+      g.fill();
+    }
+    g.globalAlpha = 1;
   }
 
   private drawSpinner(g: CanvasRenderingContext2D, spinner: Spinner, time: number): void {
@@ -1085,13 +1189,13 @@ export class DrawableOsuRuleset implements DrawableRuleset {
     }
   }
 
-  private drawCursor(g: CanvasRenderingContext2D, time: number): void {
+  private drawCursor(g: CanvasRenderingContext2D, time: number, withTrail = true): void {
     const x = this.offsetX + this.cursor.x * this.scale;
     const y = this.offsetY + this.cursor.y * this.scale;
     const size = 14 * this.cursorSize * Math.max(0.8, Math.min(1.4, this.scale));
     const pressed = this.pressed.size > 0;
 
-    if (this.showCursorTrail) {
+    if (this.showCursorTrail && withTrail) {
       this.cursorTrail.push({ x, y, t: time });
       while (this.cursorTrail.length > 0 && (this.cursorTrail[0].t < time - 120 || this.cursorTrail[0].t > time)) this.cursorTrail.shift();
       for (const p of this.cursorTrail) {
@@ -1120,6 +1224,7 @@ export class DrawableOsuRuleset implements DrawableRuleset {
   }
 
   dispose(): void {
+    this.legacy?.dispose();
     for (const ss of this.sliderStates.values()) ss.slideLoop?.forEach(l => l.stop());
     for (const st of this.spinnerStates.values()) st.spinLoop?.stop();
   }

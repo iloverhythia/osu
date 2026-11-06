@@ -13,7 +13,11 @@ export enum Easing {
   OutQuint,
   OutCubic,
   InCubic,
+  OutElasticHalf,
 }
+
+const ELASTIC_CONST = (2 * Math.PI) / 0.3;
+const ELASTIC_CONST2 = 0.3 / 4;
 
 /** osu-framework DefaultEasingFunction */
 export function applyEasing(easing: Easing, t: number): number {
@@ -40,6 +44,8 @@ export function applyEasing(easing: Easing, t: number): number {
     }
     case Easing.InCubic:
       return t * t * t;
+    case Easing.OutElasticHalf:
+      return Math.pow(2, -10 * t) * Math.sin((0.5 * t - ELASTIC_CONST2) * ELASTIC_CONST) + 1;
   }
 }
 
@@ -82,4 +88,42 @@ export function progress(time: number, start: number, duration: number, easing: 
   if (duration <= 0) return time >= start ? 1 : 0;
   const t = Math.min(1, Math.max(0, (time - start) / duration));
   return applyEasing(easing, t);
+}
+
+/**
+ * A single transformable property (osu-framework TargetGroupingTransformTracker semantics): adding a transform removes
+ * transforms of the same property which start after it; the latest-started transform determines the value.
+ */
+export class Prop {
+  private steps: Step[] = [];
+
+  constructor(public initial: number) {}
+
+  /** Adds a transform. Returns this for chaining. */
+  add(start: number, duration: number, to: number, easing: Easing = Easing.None, from?: number): this {
+    this.steps = this.steps.filter(s => s.start <= start);
+    this.steps.push({ start, duration, to, easing, from });
+    return this;
+  }
+
+  /** Sets the value instantly at `time` (e.g. ScaleTo(x) with no duration). */
+  set(time: number, value: number): this {
+    return this.add(time, 0, value);
+  }
+
+  at(time: number): number {
+    return evaluate(time, this.initial, this.steps);
+  }
+
+  /** Time at which the last transform ends. */
+  get endTime(): number {
+    let t = -Infinity;
+    for (const s of this.steps) t = Math.max(t, s.start + s.duration);
+    return t;
+  }
+
+  clear(value: number): void {
+    this.steps = [];
+    this.initial = value;
+  }
 }

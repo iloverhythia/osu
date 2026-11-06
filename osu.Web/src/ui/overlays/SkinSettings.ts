@@ -3,6 +3,7 @@
 
 import { settings } from '../../framework/Settings';
 import { ACTIVE_SKIN_SETTING, deleteSkin, listSkins, SkinStore, type SkinInfo } from '../../game/skinning';
+import { confirmDialog } from '../confirm';
 import { clear, h } from '../dom';
 import type { Game } from '../Game';
 
@@ -21,7 +22,7 @@ export function skinSettingsSection(game: Game): HTMLElement | null {
     const id = current();
     const selected = skins.find(s => s.id === id);
     select.value = selected ? selected.id : '';
-    info.textContent = selected ? `by ${selected.creator}` : skins.length === 0 ? 'Import an osu! skin (.osk) to use its elements and hitsounds.' : '';
+    info.textContent = selected ? `by ${selected.creator}` : skins.length === 0 ? 'Import an osu!stable skin (.osk) to use its elements and hitsounds.' : '';
     deleteButton.disabled = !selected;
   };
 
@@ -40,7 +41,8 @@ export function skinSettingsSection(game: Game): HTMLElement | null {
   deleteButton.addEventListener('click', async () => {
     const id = current();
     const skin = skins.find(s => s.id === id);
-    if (!skin || !confirm(`Delete the skin "${skin.name}"?`)) return;
+    if (!skin) return;
+    if (!(await confirmDialog(game, `Delete the skin "${skin.name}"?`, 'Delete'))) return;
     try {
       await deleteSkin(skin.id);
       game.toast(`Deleted skin "${skin.name}"`, 'success');
@@ -57,7 +59,7 @@ export function skinSettingsSection(game: Game): HTMLElement | null {
     h(
       'div',
       { class: 'setting' },
-      h('label', null, 'Skin files', h('div', { class: 'hint' }, 'Legacy (osu!stable) skins are supported. Missing elements use the default skin.')),
+      h('label', null, 'Skin files', h('div', { class: 'hint' }, 'osu!stable skins (.osk) are supported. Missing elements use the default skin.')),
       h('div', { style: { display: 'flex', gap: '8px' } }, h('button', { class: 'btn small ghost', onclick: () => game.openFilePicker() }, 'Import .osk'), deleteButton),
     ),
   );

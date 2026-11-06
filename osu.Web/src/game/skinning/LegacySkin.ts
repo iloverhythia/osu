@@ -407,7 +407,7 @@ export class LegacyBeatmapSkin extends LegacySkin {
    * The player resolves beatmap-provided hit samples itself ("beatmap:" lookups of HitSampleInfo), which covers
    * LegacyBeatmapSkin.GetSample (only samples with a custom sample bank are served by the beatmap).
    */
-  getSample(): AudioBuffer | null {
+  getSample(_name: string): AudioBuffer | null {
     return null;
   }
 
