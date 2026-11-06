@@ -106,6 +106,7 @@ export class PlayerScreen extends Screen {
       h('div', { class: 'meta-artist' }, `${e.artist} · [${e.difficultyName}]`),
       h('div', { class: 'meta-artist', style: { fontSize: '15px' } }, `mapped by ${e.creator}${mods.isEmpty ? '' : ` · ${mods.list.join(' ')}`}`),
       replay ? h('div', { class: 'meta-artist', style: { fontSize: '15px', color: 'var(--blue)' } }, `Watching ${replay.player}'s replay`) : null,
+      h('div', { class: 'epilepsy-warning', style: { display: 'none' } }, '⚠ This beatmap contains scenes with rapidly flashing colours. Please take caution if you are affected by epilepsy.'),
       h('div', { class: 'spinner' }),
     );
     this.skipButton = h('button', { class: 'btn primary skip-button', style: { display: 'none' }, onclick: () => this.skip() }, 'Skip ', h('span', { class: 'kbd' }, 'Space'));
@@ -127,6 +128,11 @@ export class PlayerScreen extends Screen {
     this.audio = await this.game.ensureAudio();
     await this.audio.loadDefaultSamples();
     this.beatmap = await this.working.getBeatmap();
+    // EpilepsyWarning: show the warning and give the player time to read it.
+    if (this.beatmap.epilepsyWarning) {
+      (this.loaderEl.querySelector('.epilepsy-warning') as HTMLElement).style.display = '';
+      await new Promise(r => setTimeout(r, 3000));
+    }
     if (!this.ruleset.canConvert(this.beatmap)) throw new Error(`This beatmap can't be played in ${this.ruleset.name}`);
 
     this.playable = this.ruleset.createPlayable(applyDifficultyAdjust(this.beatmap, this.mods), this.mods);
@@ -175,6 +181,7 @@ export class PlayerScreen extends Screen {
 
     this.loaded = true;
     this.loaderEl.style.opacity = '0';
+    this.loaderEl.style.pointerEvents = 'none';
     setTimeout(() => (this.loaderEl.style.display = 'none'), 500);
     this.resize();
     this.lastFrameReal = performance.now();
@@ -408,6 +415,11 @@ export class PlayerScreen extends Screen {
       return true;
     }
     if (this.paused || this.failed) {
+      const target = this.pauseOverlay?.querySelector('.resume-target.hover') as HTMLButtonElement | null;
+      if (target && this.bindings.has(e.code)) {
+        target.click();
+        return true;
+      }
       if (e.code === 'Enter' && this.pauseOverlay) {
         (this.pauseOverlay.querySelector('.btn') as HTMLButtonElement | null)?.click();
         return true;
@@ -448,6 +460,7 @@ export class PlayerScreen extends Screen {
     if (this.inputBlocked) return;
     e.preventDefault();
     const p = this.localPos(e);
+    this.lastPointer = p;
     const t = this.eventTime(e.timeStamp);
     if (e.pointerType === 'touch' || e.pointerType === 'pen') {
       this.canvas.setPointerCapture?.(e.pointerId);
@@ -472,6 +485,7 @@ export class PlayerScreen extends Screen {
         this.recordTouch('tm', e.pointerId, p, t);
         this.drawable.onTouchMove?.(e.pointerId, p.x, p.y, t);
       } else {
+        this.lastPointer = p;
         this.recordMove(p, t);
         this.drawable.onPointerMove?.(p.x, p.y, t);
       }
@@ -590,6 +604,37 @@ export class PlayerScreen extends Screen {
     this.showPauseOverlay();
   }
 
+  /** Last pointer position (CSS px), used by the osu! resume overlay. */
+  private lastPointer: { x: number; y: number } | null = null;
+
+  /**
+   * OsuResumeOverlay: in osu!, gameplay only resumes once the cursor is clicked where it was when pausing,
+   * so pausing can't be used to reposition the cursor. Other rulesets resume immediately.
+   */
+  private requestResume(): void {
+    if (this.ruleset.shortName !== 'osu' || !this.lastPointer || this.mods.has('AP') || this.mods.has('RX')) {
+      this.resume();
+      return;
+    }
+    this.closePauseOverlay();
+    const p = this.lastPointer;
+    const target = h(
+      'button',
+      {
+        class: 'resume-target',
+        style: { left: `${p.x}px`, top: `${p.y}px` },
+        title: 'Click to resume',
+        onclick: () => this.resume(),
+      },
+    );
+    const el = h('div', { class: 'overlay', style: { background: 'rgba(0,0,0,0.35)' } }, h('div', { class: 'resume-hint' }, 'Click the circle to resume'), target);
+    // Keyboard hit keys also resume while hovering the target (like lazer).
+    target.addEventListener('pointerenter', () => target.classList.add('hover'));
+    target.addEventListener('pointerleave', () => target.classList.remove('hover'));
+    this.pauseOverlay = el;
+    this.el.appendChild(el);
+  }
+
   private resume(): void {
     if (!this.paused) return;
     this.paused = false;
@@ -604,7 +649,8 @@ export class PlayerScreen extends Screen {
     if (this.resultsShown) return true;
     if (this.failed) return true;
     if (this.paused) {
-      this.resume();
+      if (this.pauseOverlay?.querySelector('.resume-target')) this.showPauseOverlay();
+      else this.requestResume();
       return false;
     }
     if (this.mods.isAutoplay || this.replay) return true;
@@ -629,7 +675,7 @@ export class PlayerScreen extends Screen {
         'div',
         { class: 'pause-menu' },
         h('h2', null, 'Paused'),
-        h('button', { class: 'btn primary', onclick: () => this.resume() }, 'Continue'),
+        h('button', { class: 'btn primary', onclick: () => this.requestResume() }, 'Continue'),
         h('button', { class: 'btn', onclick: () => this.retry() }, 'Retry'),
         h('button', { class: 'btn danger', onclick: () => this.quit() }, 'Quit'),
       ),
