@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.local
 test-results/
+dist-pages/
+dist-artifact/
