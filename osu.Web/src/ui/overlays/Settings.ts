@@ -145,6 +145,7 @@ export function openSettings(game: Game): void {
     slider('Effect volume', 'audio.effects', 0, 1, 0.01, pct),
     slider('Audio offset', 'audio.offset', -500, 500, 1, v => `${v}ms`, 'Positive values make hit objects appear later.'),
     toggle('Compensate for output latency', 'audio.compensateLatency', 'Uses the browser-reported audio output latency.'),
+    slider('Positional hitsounds', 'audio.positionalHitsoundsLevel', 0, 1, 0.01, pct),
 
     h('h3', null, 'Gameplay'),
     slider('Background dim', 'gameplay.backgroundDim', 0, 1, 0.01, pct),
@@ -176,6 +177,8 @@ export function openSettings(game: Game): void {
     toggle('Snaking in sliders', 'osu.snakingIn'),
     toggle('Snaking out sliders', 'osu.snakingOut'),
     toggle('Hit lighting', 'osu.hitLighting'),
+    toggle('Hit animations', 'osu.hitAnimations'),
+    toggle('Adjust cursor size based on circle size', 'osu.autoCursorSize'),
 
     h('h3', null, RULESET_DISPLAY_NAMES[3]),
     slider('Scroll speed', 'mania.scrollSpeed', 1, 40, 1, v => String(v)),

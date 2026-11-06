@@ -41,6 +41,8 @@
 
 .ss-main {
   position: absolute;
+  z-index: 0;
+  isolation: isolate;
   left: 0;
   right: 0;
   top: 0;
@@ -401,12 +403,12 @@
   min-width: 65px;
 }
 
-.sd-bars {
+.stdf-bars {
   position: relative;
   height: 2px;
 }
 
-.sd-bar {
+.stdf-bar {
   position: absolute;
   left: 0;
   top: 0;
@@ -415,17 +417,17 @@
   width: 0;
 }
 
-.sd-bar.back {
+.stdf-bar.back {
   width: 100%;
   background: #000;
   z-index: 0;
 }
 
-.sd-bar:not(.back) {
+.stdf-bar:not(.back) {
   z-index: 1;
 }
 
-.sd-label {
+.stdf-label {
   margin-top: 2px;
   font-size: 14px;
   font-weight: 600;
@@ -436,17 +438,17 @@
   text-overflow: ellipsis;
 }
 
-.sd-value-row {
+.stdf-value-row {
   display: flex;
   align-items: center;
 }
 
-.sd-value {
+.stdf-value {
   font-size: 16px;
   line-height: 1.2;
 }
 
-.sd-value-icon {
+.stdf-value-icon {
   margin: -4px 0 0 2px;
 }
 

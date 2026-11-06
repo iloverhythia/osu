@@ -117,13 +117,13 @@ class StatisticDifficulty {
   labelText = '';
 
   constructor(colours: OverlayColourProvider) {
-    this.bar = h('div', { class: 'sd-bar' });
-    this.adjustedBar = h('div', { class: 'sd-bar adjusted' });
-    this.label = h('div', { class: 'sd-label' });
+    this.bar = h('div', { class: 'stdf-bar' });
+    this.adjustedBar = h('div', { class: 'stdf-bar adjusted' });
+    this.label = h('div', { class: 'stdf-label' });
     this.label.style.color = css(colours.content2);
-    this.value = h('span', { class: 'sd-value' });
-    this.valueIcon = h('span', { class: 'sd-value-icon' });
-    this.el = h('div', { class: 'stat-difficulty' }, h('div', { class: 'sd-bars' }, h('div', { class: 'sd-bar back' }), this.bar, this.adjustedBar), this.label, h('div', { class: 'sd-value-row' }, this.value, this.valueIcon));
+    this.value = h('span', { class: 'stdf-value' });
+    this.valueIcon = h('span', { class: 'stdf-value-icon' });
+    this.el = h('div', { class: 'stat-difficulty' }, h('div', { class: 'stdf-bars' }, h('div', { class: 'stdf-bar back' }), this.bar, this.adjustedBar), this.label, h('div', { class: 'stdf-value-row' }, this.value, this.valueIcon));
   }
 
   set accent(c: string) {
@@ -203,7 +203,7 @@ class DifficultyStatisticsDisplay {
       });
       requestAnimationFrame(() => {
         // updateStatisticsSizing: every statistic gets the width of the widest label (minimum 65).
-        const width = Math.max(65, ...this.stats.map(s => (s.el.querySelector('.sd-label') as HTMLElement).scrollWidth));
+        const width = Math.max(65, ...this.stats.map(s => (s.el.querySelector('.stdf-label') as HTMLElement).scrollWidth));
         for (const s of this.stats) {
           s.el.style.width = `${width}px`;
           tween(s.el, { opacity: '1' }, 200, Easing.InQuint);

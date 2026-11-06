@@ -419,11 +419,16 @@ export class ScreenFooter {
     this.activeOverlay = overlay;
     const idx = owner ? this.buttons.indexOf(owner) : -1;
     this.hiddenForOverlay = idx >= 0 ? this.buttons.slice(idx + 1) : [...this.buttons];
-    for (const b of [...this.hiddenForOverlay].reverse()) {
+    // Hidden buttons move out of the flow (into lazer's hiddenLeftButtonsContainer), keeping their position.
+    const lefts = this.hiddenForOverlay.map(b => b.el.offsetLeft);
+    this.hiddenForOverlay.forEach((b, i) => {
       b.hidden = true;
       b.disappearToBottom(0);
       b.el.style.pointerEvents = 'none';
-    }
+      b.el.style.position = 'absolute';
+      b.el.style.left = `${lefts[i]}px`;
+      b.el.style.bottom = '0';
+    });
     this.updateColourScheme(hue);
     this.overlayContent.textContent = '';
     if (content) {
@@ -441,6 +446,9 @@ export class ScreenFooter {
     }
     for (const b of this.hiddenForOverlay) {
       b.hidden = false;
+      b.el.style.position = '';
+      b.el.style.left = '';
+      b.el.style.bottom = '';
       b.appearFromBottom(0);
       b.el.style.pointerEvents = '';
     }
