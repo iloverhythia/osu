@@ -37,8 +37,47 @@ export class AudioEngine {
     const Ctor: typeof AudioContext = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     this.ctx = new Ctor({ latencyHint: 'interactive' });
     this.master = new Bus(this.ctx, this.ctx.destination);
-    this.music = new Bus(this.ctx, this.master.gain);
+    // Music chain: track → music gain → low-pass filter → analyser → master.
+    this.musicFilter = this.ctx.createBiquadFilter();
+    this.musicFilter.type = 'lowpass';
+    this.musicFilter.frequency.value = this.ctx.sampleRate / 2;
+    this.musicFilter.Q.value = 0.7071;
+    this.musicAnalyser = this.ctx.createAnalyser();
+    this.musicAnalyser.fftSize = 512;
+    this.musicAnalyser.smoothingTimeConstant = 0;
+    this.musicFilter.connect(this.musicAnalyser).connect(this.master.gain);
+    this.music = new Bus(this.ctx, this.musicFilter);
     this.effects = new Bus(this.ctx, this.master.gain);
+  }
+
+  /**
+   * Low-pass filter on the music (osu-framework AudioFilter, used by FailAnimation / pause effects).
+   * Set `frequency` to sampleRate / 2 to disable.
+   */
+  readonly musicFilter: BiquadFilterNode;
+
+  /** Analyser on the music output (ITrack.CurrentAmplitudes, used by LogoVisualisation / menu effects). */
+  readonly musicAnalyser: AnalyserNode;
+
+  /**
+   * Approximation of BASS's ChannelGetLevel-based TrackAmplitudes: returns { left, right, average } in [0, 1]
+   * plus the FFT magnitudes (256 bins, 0..1) like ITrack.CurrentAmplitudes.FrequencyAmplitudes.
+   */
+  getAmplitudes(): { left: number; right: number; average: number; frequencies: Float32Array } {
+    const bins = new Uint8Array(this.musicAnalyser.frequencyBinCount);
+    this.musicAnalyser.getByteFrequencyData(bins);
+    const frequencies = new Float32Array(bins.length);
+    let sum = 0;
+    for (let i = 0; i < bins.length; i++) {
+      frequencies[i] = bins[i] / 255;
+      sum += frequencies[i];
+    }
+    const wave = new Float32Array(this.musicAnalyser.fftSize);
+    this.musicAnalyser.getFloatTimeDomainData(wave);
+    let peak = 0;
+    for (const v of wave) peak = Math.max(peak, Math.abs(v));
+    void sum;
+    return { left: peak, right: peak, average: peak, frequencies };
   }
 
   /** Must be called from a user gesture at least once (autoplay policy). */
