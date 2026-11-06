@@ -121,7 +121,7 @@ export class Beatmap {
   comboColours: [number, number, number][] = [];
   customColours: Record<string, [number, number, number, number]> = {};
   audioLeadIn = 0;
-  stackLeniency = 0.7;
+  stackLeniency = Math.fround(0.7);
   countdown = 1;
   countdownOffset = 0;
   specialStyle = false;
@@ -132,6 +132,13 @@ export class Beatmap {
   bookmarks: number[] = [];
   /** [Editor] BeatDivisor (BeatmapInfo.BeatDivisor), clamped to 1..16. */
   beatDivisor = 4;
+  /** [Editor] DistanceSpacing / GridSize / TimelineZoom / VelocityPresets */
+  distanceSpacing = 1;
+  gridSize = 32;
+  timelineZoom = 1;
+  sliderVelocityPresets: number[] = [];
+  /** [Events] lines other than the background and breaks (video, storyboard elements and commands), kept for re-encoding. */
+  storyboardLines: string[] = [];
 
   get firstObjectTime(): number {
     return this.hitObjects.length > 0 ? this.hitObjects[0].startTime : 0;

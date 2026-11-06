@@ -19,6 +19,13 @@ export const ICONS = {
   /** OsuIcon.Beatmap (browse → import) */
   browse: svg('<path d="M12 23.5V7.5l13-3v16"/><circle cx="8.5" cy="23.5" r="3.5"/><circle cx="21.5" cy="20.5" r="3.5"/>'),
   /** OsuIcon.EditCircle (the "edit" slot, used for the chart generator) */
+  /** OsuIcon.Beatmap */
+  beatmap: svg('<rect x="6" y="5" width="20" height="22" rx="3"/><circle cx="16" cy="16" r="5"/>'),
+  /** OsuIcon.SkinB */
+  skin: svg('<path d="M16 5a11 11 0 1 0 0 22c1.7 0 2.4-1.2 2-2.5-.5-1.5.3-3 2-3H23a4 4 0 0 0 4-4C27 10 22 5 16 5z"/><circle cx="10.5" cy="14" r="1.6"/><circle cx="15" cy="10" r="1.6"/><circle cx="20.5" cy="11.5" r="1.6"/>'),
+  /** OsuIcon.CrossCircle */
+  exit: svg('<circle cx="16" cy="16" r="12.5"/><path d="M11.5 11.5l9 9M20.5 11.5l-9 9"/>'),
+  magic: svg('<path d="M6 26 20 12M18 8l1-3 1 3 3 1-3 1-1 3-1-3-3-1zM25 15l.7-1.8L27.5 12.5l-1.8-.7L25 10l-.7 1.8-1.8.7 1.8.7z"/>'),
   edit: svg('<path d="M20.5 6.5l5 5L12 25H7v-5z"/><path d="M17.5 9.5l5 5"/>'),
   /** FontAwesome.Solid.Lightbulb */
   lightbulb: svg('<path d="M11.5 21.5c0-3-4-5-4-10a8.5 8.5 0 0 1 17 0c0 5-4 7-4 10z"/><path d="M12.5 25.5h7M14 29h4"/>'),

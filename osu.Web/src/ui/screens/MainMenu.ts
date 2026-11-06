@@ -95,6 +95,9 @@ export class MainMenuScreen extends Screen {
           setTimeout(() => select.startSelected(), 700);
         },
       });
+    this.buttons.onEditBeatmap = () => this.editBeatmap();
+    this.buttons.onEditSkin = () => void import('../editor/SkinEditor').then(m => m.openSkinEditor(this.game));
+    this.buttons.onExit = () => void this.exitGame(true);
     this.buttons.onStateChanged = s => {
       const toolbarShown = s !== ButtonSystemState.Initial && s !== ButtonSystemState.Exit;
       this.toolbar?.classList.toggle('shown', toolbarShown);
@@ -182,6 +185,67 @@ export class MainMenuScreen extends Screen {
     this.bottomScale.to(1, t, 1000, Easing.OutQuint);
     this.bottomAlpha.to(1, t, 1000, Easing.OutQuint);
     this.startLoop();
+  }
+
+  // ---------------------------------------------------------------- edit / exit
+
+  /** MainMenu.loadEditor: the editor opens on the selected beatmap (a new one when nothing is selected). */
+  private editBeatmap(): void {
+    const w = this.game.working;
+    void import('../editor/Editor').then(m => {
+      if (w) void m.openEditor(this.game, w.set, w.entry);
+      else m.newBeatmap(this.game);
+    });
+  }
+
+  /**
+   * MainMenu.OnExiting: ConfirmExitDialog when there are ongoing operations (or the exit wasn't a click), then the exit
+   * sequence (ButtonSystemState.Exit, song ticker hidden, the screen fading out over 3s). A browser tab can't close
+   * itself, so the game returns to its start gate afterwards.
+   */
+  private async exitGame(viaClick: boolean): Promise<void> {
+    const ongoing = this.game.notifications.ongoingOperations;
+    if (ongoing.length > 0 || !viaClick) {
+      const { popupDialog } = await import('../confirm');
+      const body =
+        ongoing.length > 0
+          ? `There are currently some background operations which will be aborted if you continue:\n${ongoing.slice(0, 10).join('\n')}\n\nLast chance to turn back`
+          : 'Last chance to turn back';
+      const i = await popupDialog(this.game, {
+        icon: 'warning',
+        header: `Are you sure you want to exit ${APP_NAME}?`,
+        body,
+        buttons: ongoing.length > 0 ? [{ text: 'Let me out!', type: 'danger' }, { text: 'Back', type: 'cancel' }] : [{ text: 'Let me out!', type: 'ok' }, { text: 'Just a little more...', type: 'cancel' }],
+      });
+      if (i !== 0) return;
+    }
+    this.buttons.state = ButtonSystemState.Exit;
+    this.toolbar.classList.remove('shown');
+    this.songTicker.el.style.opacity = '0';
+    this.el.style.transition = 'opacity 3000ms';
+    this.el.style.opacity = '0';
+    const track = this.game.previewTrack;
+    if (track) {
+      const start = performance.now();
+      const v0 = track.volume;
+      const fade = () => {
+        const p = Math.min(1, (performance.now() - start) / 3000);
+        track.volume = v0 * (1 - p);
+        if (p < 1) requestAnimationFrame(fade);
+      };
+      fade();
+    }
+    setTimeout(() => {
+      this.game.stopPreview();
+      const gate = document.createElement('div');
+      gate.className = 'intro-gate exited';
+      const hint = document.createElement('div');
+      hint.className = 'intro-gate-hint';
+      hint.textContent = 'See you next time! Click anywhere to start again';
+      gate.appendChild(hint);
+      gate.addEventListener('click', () => location.reload());
+      document.body.appendChild(gate);
+    }, 3000);
   }
 
   // ---------------------------------------------------------------- intro
@@ -388,7 +452,8 @@ export class MainMenuScreen extends Screen {
 
   /** GlobalAction.Back: ButtonSystem.goBack (the main menu itself never exits: AllowUserExit = false). */
   onBack(): boolean {
-    if (this.phase === 'menu') this.buttons.goBack();
+    // At the logo, Back exits the game (with ConfirmExitDialog).
+    if (this.phase === 'menu' && !this.buttons.goBack() && this.buttons.state === ButtonSystemState.Initial) void this.exitGame(false);
     return false;
   }
 }

@@ -253,3 +253,17 @@
   font-size: 18px;
   animation: pulse 1.6s ease-in-out infinite;
 }
+
+/* After the exit sequence: the "closed" game. */
+.intro-gate.exited {
+  position: fixed;
+  z-index: 3000;
+  background: #000;
+  animation: exited-in 600ms ease;
+}
+
+@keyframes exited-in {
+  from {
+    opacity: 0;
+  }
+}

@@ -46,6 +46,8 @@ import { PlayerLoaderView } from '../hud/PlayerLoader';
 export interface PlayerRestartInfo {
   restartCount: number;
   quick: boolean;
+  /** EditorPlayer: test play from the editor (no results or score, returns to the editor when done). */
+  editorTest?: boolean;
 }
 
 /** PlayerLoader.BACKGROUND_BLUR */
@@ -115,7 +117,7 @@ export class PlayerScreen extends Screen {
 
   /** UserStatistics: play count, total score, hits and play time for the current profile (own plays only). */
   private recordProfilePlay(): void {
-    if (this.playRecorded || !this.gameplayStarted) return;
+    if (this.playRecorded || !this.gameplayStarted || this.restart?.editorTest) return;
     this.playRecorded = true;
     if (this.replay) {
       Profiles.recordReplayWatched(this.ruleset.id);
@@ -1201,7 +1203,7 @@ export class PlayerScreen extends Screen {
     if (this.isRestarting || this.disposed) return;
     this.isRestarting = true;
     this.track?.stop();
-    this.game.replace(new PlayerScreen(this.game, this.working, this.ruleset, this.mods, this.replay, { restartCount: (this.restart?.restartCount ?? 0) + 1, quick }));
+    this.game.replace(new PlayerScreen(this.game, this.working, this.ruleset, this.mods, this.replay, { restartCount: (this.restart?.restartCount ?? 0) + 1, quick, editorTest: this.restart?.editorTest }));
   }
 
   /** Player.checkScoreCompleted */
@@ -1228,6 +1230,12 @@ export class PlayerScreen extends Screen {
     this.releaseHighPrecision();
     if (this.resultsShown) return;
     this.resultsShown = true;
+    if (this.restart?.editorTest) {
+      // EditorPlayer: back to the editor once the beatmap is complete.
+      this.track?.stop();
+      if (this.game.currentScreen === this) this.game.pop();
+      return;
+    }
     const sp = this.scoreProcessor;
     const result: PlayResult = {
       working: this.working,

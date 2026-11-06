@@ -282,6 +282,27 @@ export class LegacyBeatmapDecoder {
       this.beatmap.beatDivisor = clamp(parseInt32(value), 1, 16);
       return;
     }
+    if (key === 'DistanceSpacing') {
+      this.beatmap.distanceSpacing = Math.max(0, parseDouble(value));
+      return;
+    }
+    if (key === 'GridSize') {
+      this.beatmap.gridSize = parseInt32(value);
+      return;
+    }
+    if (key === 'TimelineZoom') {
+      this.beatmap.timelineZoom = Math.max(0, parseDouble(value));
+      return;
+    }
+    if (key === 'VelocityPresets') {
+      this.beatmap.sliderVelocityPresets = value
+        .split(',')
+        .map(v => v.trim())
+        .filter(v => v.length > 0)
+        .map(Number)
+        .filter(v => Number.isFinite(v));
+      return;
+    }
     if (key === 'Bookmarks') {
       this.beatmap.bookmarks = value
         .split(',')
@@ -370,6 +391,7 @@ export class LegacyBeatmapDecoder {
               ? 'Sprite'
               : null;
     const m = this.beatmap.metadata;
+    if (type !== 'Background' && type !== 'Break') this.beatmap.storyboardLines.push(line);
     switch (type) {
       case 'Sprite':
         // Generally, the background is the first thing defined in a beatmap file.

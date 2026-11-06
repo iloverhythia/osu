@@ -294,6 +294,7 @@ export class ButtonSystem {
   private readonly backButton: MainMenuButton;
   private readonly buttonsPlay: MainMenuButton[] = [];
   private readonly buttonsTopLevel: MainMenuButton[] = [];
+  private readonly buttonsEdit: MainMenuButton[] = [];
   private readonly all: MainMenuButton[];
 
   private logo: OsuLogo | null = null;
@@ -314,6 +315,9 @@ export class ButtonSystem {
   onSettings: (() => void) | null = null;
   onBeatmapListing: (() => void) | null = null;
   onEdit: (() => void) | null = null;
+  onEditBeatmap: (() => void) | null = null;
+  onEditSkin: (() => void) | null = null;
+  onExit: (() => void) | null = null;
 
   constructor(
     private readonly game: Game,
@@ -378,12 +382,14 @@ export class ButtonSystem {
         padLeft: WEDGE_WIDTH,
       }),
       new MainMenuButton(game, {
-        text: 'generate',
+        text: 'edit',
         sampleName: 'menu-click',
         icon: 'edit',
         colour: 'rgb(238,170,0)',
-        action: () => this.onEdit?.(),
-        keys: ['KeyE', 'KeyG'],
+        action: () => {
+          this.state = ButtonSystemState.Edit;
+        },
+        keys: ['KeyE'],
       }),
       new MainMenuButton(game, {
         text: 'browse',
@@ -393,9 +399,51 @@ export class ButtonSystem {
         action: () => this.onBeatmapListing?.(),
         keys: ['KeyB', 'KeyD'],
       }),
+      new MainMenuButton(game, {
+        text: 'exit',
+        sampleName: '',
+        icon: 'exit',
+        colour: 'rgb(238,51,153)',
+        action: () => this.onExit?.(),
+        keys: ['KeyQ'],
+      }),
+    );
+    // buttonsEdit: beatmap editor, skin editor (+ the chart generator).
+    this.buttonsEdit.push(
+      new MainMenuButton(game, {
+        text: 'beatmap editor',
+        sampleName: 'menu-click',
+        icon: 'beatmap',
+        colour: 'rgb(238,170,0)',
+        action: () => this.onEditBeatmap?.(),
+        keys: ['KeyB', 'KeyE'],
+        padLeft: WEDGE_WIDTH,
+        visibleMin: ButtonSystemState.Edit,
+        visibleMax: ButtonSystemState.Edit,
+      }),
+      new MainMenuButton(game, {
+        text: 'skin editor',
+        sampleName: 'menu-click',
+        icon: 'skin',
+        colour: 'rgb(220,160,0)',
+        action: () => this.onEditSkin?.(),
+        keys: ['KeyS'],
+        visibleMin: ButtonSystemState.Edit,
+        visibleMax: ButtonSystemState.Edit,
+      }),
+      new MainMenuButton(game, {
+        text: 'generator',
+        sampleName: 'menu-click',
+        icon: 'magic',
+        colour: 'rgb(200,140,0)',
+        action: () => this.onEdit?.(),
+        keys: ['KeyG'],
+        visibleMin: ButtonSystemState.Edit,
+        visibleMax: ButtonSystemState.Edit,
+      }),
     );
     // Flow order (insertion order): settings, back, logo facade, [multi], play buttons, [edit], top level buttons.
-    this.all = [this.settingsButton, this.backButton, ...this.buttonsPlay, ...this.buttonsTopLevel];
+    this.all = [this.settingsButton, this.backButton, ...this.buttonsPlay, ...this.buttonsEdit, ...this.buttonsTopLevel];
     for (const b of this.all) this.flow.appendChild(b.el);
 
     window.addEventListener('pointermove', e => (this.mouse = { x: e.clientX / this.uiScale, y: e.clientY / this.uiScale }));
@@ -540,6 +588,9 @@ export class ButtonSystem {
       case ButtonSystemState.Play:
         this.buttonsPlay[0].triggerClick();
         return false;
+      case ButtonSystemState.Edit:
+        this.buttonsEdit[0].triggerClick();
+        return false;
     }
   }
 
@@ -627,7 +678,7 @@ export class ButtonSystem {
     const facadeWidth = this.facadeSize * 0.74;
 
     // FillFlow with spacing -WEDGE_WIDTH; children: settings, back, facade, play buttons, top level buttons.
-    const children: (MainMenuButton | 'facade')[] = [this.settingsButton, this.backButton, 'facade', ...this.buttonsPlay, ...this.buttonsTopLevel];
+    const children: (MainMenuButton | 'facade')[] = [this.settingsButton, this.backButton, 'facade', ...this.buttonsPlay, ...this.buttonsEdit, ...this.buttonsTopLevel];
     let cursor = 0;
     let facadeLeft = 0;
     const lefts = new Map<MainMenuButton, number>();

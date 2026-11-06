@@ -845,6 +845,14 @@ export class SongSelectScreen extends Screen {
     ];
     return [
       { text: 'Play', type: 'highlighted', icon: 'check', action: () => this.selectAndRun(b) },
+      {
+        text: 'Edit',
+        icon: 'edit',
+        action: () => {
+          const src = this.model.sources.get(b);
+          if (src) void import('../editor/Editor').then(m => m.openEditor(this.game, src.set, src.entry));
+        },
+      },
       { text: '', spacer: true },
       { text: 'Collections', items: collectionItems },
       played

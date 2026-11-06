@@ -85,6 +85,11 @@ export class NotificationOverlay {
     return this.open;
   }
 
+  /** NotificationOverlay.OngoingOperations: the running tasks' texts. */
+  get ongoingOperations(): string[] {
+    return [...this.entries].filter(e => e.kind === 'progress' && !e.closed).map(e => e.el.querySelector('.nt-text')?.textContent ?? '');
+  }
+
   /** NotificationOverlay.UnreadCount */
   get unreadCount(): number {
     let n = 0;
