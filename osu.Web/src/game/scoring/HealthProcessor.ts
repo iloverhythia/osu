@@ -16,7 +16,7 @@ export abstract class HealthProcessor {
 
   protected simulating = false;
 
-  abstract applyBeatmap(perfectResults: JudgementResult[], drainRate: number, breaks: BreakPeriod[], lastObjectEndTime: number): void;
+  abstract applyBeatmap(perfectResults: JudgementResult[], drainRate: number, breaks: BreakPeriod[], lastObjectEndTime: number, objectTimes?: { start: number; end: number }[]): void;
 
   /** Called every frame with the current gameplay time. */
   update(_time: number, _elapsed: number): void {}
@@ -201,7 +201,7 @@ export class AccumulatingHealthProcessor extends HealthProcessor {
     this.health = 0;
   }
 
-  applyBeatmap(): void {
+  applyBeatmap(_perfectResults?: JudgementResult[], _drainRate?: number, _breaks?: BreakPeriod[], _lastObjectEndTime?: number, _objectTimes?: { start: number; end: number }[]): void {
     this.reset();
   }
 

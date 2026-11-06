@@ -1,0 +1,447 @@
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
+// The top-level game (OsuGame equivalent): screen stack, background, global audio, overlays and import handling.
+
+import { AudioEngine, Track } from '../framework/audio/AudioEngine';
+import { settings } from '../framework/Settings';
+import type { Beatmap } from '../game/beatmaps/Beatmap';
+import { WorkingBeatmap } from '../game/beatmaps/WorkingBeatmap';
+import { BeatmapLibrary } from '../game/BeatmapLibrary';
+import { ModSet } from '../game/mods/Mods';
+import { getRuleset } from '../game/rulesets';
+import type { Ruleset } from '../game/rulesets/Ruleset';
+import type { BeatmapEntry, BeatmapSetRecord } from '../game/storage/Database';
+import { importFiles } from '../game/storage/Importer';
+import { h } from './dom';
+import type { Screen } from './Screen';
+import { Triangles } from './Triangles';
+
+export class Game {
+  readonly root: HTMLElement;
+  readonly library = new BeatmapLibrary();
+  audio: AudioEngine | null = null;
+
+  private readonly bgA: HTMLDivElement;
+  private readonly bgB: HTMLDivElement;
+  private bgFront: 'A' | 'B' = 'A';
+  private readonly bgDim: HTMLDivElement;
+  private readonly triangles: Triangles;
+  private readonly screenLayer: HTMLDivElement;
+  readonly overlayLayer: HTMLDivElement;
+  private readonly toastLayer: HTMLDivElement;
+  private readonly fileInput: HTMLInputElement;
+  private readonly folderInput: HTMLInputElement;
+  private readonly fpsEl: HTMLDivElement;
+
+  private stack: Screen[] = [];
+  private overlays: { el: HTMLElement; onKey?: (e: KeyboardEvent) => boolean; onClose?: () => void }[] = [];
+
+  // Selection state (Bindable<WorkingBeatmap> / Bindable<RulesetInfo> / Bindable<Mods> in lazer)
+  working: WorkingBeatmap | null = null;
+  ruleset: Ruleset;
+  mods = new ModSet();
+  private listeners = new Set<() => void>();
+
+  // Menu / preview music
+  previewTrack: Track | null = null;
+  private previewBeatmap: Beatmap | null = null;
+
+  constructor(root: HTMLElement) {
+    this.root = root;
+    this.ruleset = getRuleset(settings.get('ui.ruleset', 0));
+
+    this.bgA = h('div', { class: 'bg-image' });
+    this.bgB = h('div', { class: 'bg-image', style: { opacity: '0' } });
+    this.bgDim = h('div', { class: 'bg-dim', style: { opacity: '0.6' } });
+    this.triangles = new Triangles();
+    this.screenLayer = h('div', { class: 'layer' });
+    this.overlayLayer = h('div', { class: 'layer', style: { pointerEvents: 'none' } });
+    this.toastLayer = h('div', { class: 'toasts' });
+    this.fpsEl = h('div', { class: 'fps' });
+    this.fileInput = h('input', { type: 'file', accept: '.osz,.osu,.zip', multiple: true, style: { display: 'none' } });
+    this.folderInput = h('input', { type: 'file', multiple: true, style: { display: 'none' } });
+    this.folderInput.setAttribute('webkitdirectory', '');
+
+    root.append(
+      h('div', { class: 'layer' }, this.bgA, this.bgB, this.bgDim),
+      this.triangles.canvas,
+      this.screenLayer,
+      this.overlayLayer,
+      this.toastLayer,
+      this.fpsEl,
+      h('div', { class: 'drop-hint' }, 'Drop .osz files or beatmap folders to import'),
+      this.fileInput,
+      this.folderInput,
+    );
+
+    this.fileInput.addEventListener('change', () => {
+      if (this.fileInput.files) void this.importFiles([...this.fileInput.files]);
+      this.fileInput.value = '';
+    });
+    this.folderInput.addEventListener('change', () => {
+      if (this.folderInput.files) void this.importFiles([...this.folderInput.files]);
+      this.folderInput.value = '';
+    });
+
+    window.addEventListener('keydown', e => this.handleKeyDown(e));
+    window.addEventListener('keyup', e => this.stack[this.stack.length - 1]?.onKeyUp(e));
+    this.setupDragDrop();
+    this.setupFps();
+
+    settings.subscribe(key => {
+      if (key.startsWith('audio.')) this.applyVolumes();
+    });
+  }
+
+  // ------------------------------------------------------------------ audio
+
+  /** Creates the audio engine (must be called from a user gesture). */
+  async ensureAudio(): Promise<AudioEngine> {
+    if (!this.audio) {
+      this.audio = new AudioEngine();
+      this.applyVolumes();
+      void this.audio.loadDefaultSamples();
+    }
+    await this.audio.resume();
+    return this.audio;
+  }
+
+  private applyVolumes(): void {
+    this.audio?.setVolumes(settings.get('audio.master', 0.8), settings.get('audio.music', 0.8), settings.get('audio.effects', 0.8));
+  }
+
+  playUiSample(name: string, volume = 1): void {
+    const b = this.audio?.getDefaultSample(name);
+    if (b) this.audio!.play(b, { volume });
+  }
+
+  // ------------------------------------------------------------------ selection
+
+  subscribe(l: () => void): () => void {
+    this.listeners.add(l);
+    return () => this.listeners.delete(l);
+  }
+
+  private emit(): void {
+    for (const l of this.listeners) l();
+  }
+
+  setRuleset(r: Ruleset): void {
+    if (r === this.ruleset) return;
+    this.ruleset = r;
+    settings.set('ui.ruleset', r.id);
+    this.mods = this.mods.forRuleset(r.shortName, r.availableMods);
+    this.emit();
+  }
+
+  setMods(m: ModSet): void {
+    this.mods = m;
+    this.emit();
+  }
+
+  /** Selects a beatmap, updating the background and preview music. */
+  select(set: BeatmapSetRecord, entry: BeatmapEntry, playPreview = true): void {
+    if (this.working && this.working.set.id === set.id && this.working.entry.hash === entry.hash) return;
+    const previousSet = this.working?.set.id;
+    const previousAudio = this.working?.entry.audioFile;
+    const old = this.working;
+    this.working = new WorkingBeatmap(set, entry);
+    this.setBackground(this.working.getBackgroundUrl());
+    if (playPreview && (previousSet !== set.id || previousAudio !== entry.audioFile)) void this.startPreview();
+    // Keep the old working beatmap's object URLs alive while the track may still be playing from it.
+    if (old && old.set.id !== set.id) setTimeout(() => old.dispose(), 2000);
+    this.emit();
+  }
+
+  async startPreview(fromStart = false): Promise<void> {
+    const working = this.working;
+    if (!working || !this.audio) return;
+    this.stopPreview();
+    const track = working.createTrack(this.audio);
+    if (!track) return;
+    this.previewTrack = track;
+    await track.ready;
+    if (this.previewTrack !== track) return;
+    const preview = working.entry.previewTime;
+    track.currentTime = fromStart ? 0 : preview > 0 ? preview : track.length * 0.4;
+    track.element.loop = true;
+    track.element.volume = 0;
+    await track.start();
+    // Fade in.
+    const startAt = performance.now();
+    const fade = () => {
+      if (this.previewTrack !== track) return;
+      const t = Math.min(1, (performance.now() - startAt) / 800);
+      track.element.volume = t;
+      if (t < 1) requestAnimationFrame(fade);
+    };
+    fade();
+    working
+      .getBeatmap()
+      .then(b => {
+        if (this.working === working) this.previewBeatmap = b;
+      })
+      .catch(() => undefined);
+  }
+
+  stopPreview(): void {
+    if (this.previewTrack) {
+      this.previewTrack.dispose();
+      this.previewTrack = null;
+    }
+  }
+
+  /** Beat phase (0..1) of the preview track, for menu animations. Returns null if unknown. */
+  beatPhase(): { phase: number; beatLength: number; kiai: boolean } | null {
+    const track = this.previewTrack;
+    const b = this.previewBeatmap;
+    if (!track || !b || !track.isRunning) return null;
+    const t = track.currentTime;
+    const tp = b.controlPoints.timingPointAt(t);
+    const phase = (((t - tp.time) % tp.beatLength) + tp.beatLength) % tp.beatLength;
+    return { phase: phase / tp.beatLength, beatLength: tp.beatLength, kiai: b.controlPoints.effectPointAt(t).kiaiMode };
+  }
+
+  // ------------------------------------------------------------------ background
+
+  setBackground(url: string | null): void {
+    const next = this.bgFront === 'A' ? this.bgB : this.bgA;
+    const prev = this.bgFront === 'A' ? this.bgA : this.bgB;
+    next.style.backgroundImage = url ? `url("${url}")` : 'none';
+    next.style.opacity = url ? '1' : '0';
+    prev.style.opacity = '0';
+    this.bgFront = this.bgFront === 'A' ? 'B' : 'A';
+  }
+
+  setBackgroundDim(dim: number, blur = 0): void {
+    this.bgDim.style.opacity = String(dim);
+    this.root.style.setProperty('--bg-blur', `${blur}px`);
+  }
+
+  // ------------------------------------------------------------------ screens
+
+  get currentScreen(): Screen | undefined {
+    return this.stack[this.stack.length - 1];
+  }
+
+  push(screen: Screen): void {
+    const prev = this.currentScreen;
+    if (prev) {
+      prev.onSuspend();
+      this.hideScreen(prev);
+    }
+    this.stack.push(screen);
+    this.showScreen(screen);
+    screen.onEnter();
+  }
+
+  /** Replaces the current screen. */
+  replace(screen: Screen): void {
+    const prev = this.stack.pop();
+    if (prev) {
+      prev.onExit();
+      this.removeScreen(prev);
+    }
+    this.stack.push(screen);
+    this.showScreen(screen);
+    screen.onEnter();
+  }
+
+  pop(): void {
+    if (this.stack.length <= 1) return;
+    const prev = this.stack.pop()!;
+    prev.onExit();
+    this.removeScreen(prev);
+    const cur = this.currentScreen!;
+    this.showScreen(cur);
+    cur.onResume();
+  }
+
+  /** Pops screens until the given predicate matches. */
+  popTo(match: (s: Screen) => boolean): void {
+    while (this.stack.length > 1 && !match(this.currentScreen!)) this.pop();
+  }
+
+  private showScreen(s: Screen): void {
+    s.el.classList.remove('leaving');
+    if (!s.el.isConnected) this.screenLayer.appendChild(s.el);
+    s.el.style.display = '';
+    this.setBackgroundDim(s.backgroundDim);
+    this.triangles.running = s.showTriangles;
+    this.triangles.canvas.style.display = s.showTriangles ? '' : 'none';
+  }
+
+  private hideScreen(s: Screen): void {
+    s.el.style.display = 'none';
+  }
+
+  private removeScreen(s: Screen): void {
+    s.el.classList.add('leaving');
+    setTimeout(() => s.el.remove(), 250);
+  }
+
+  back(): void {
+    if (this.overlays.length > 0) {
+      this.closeOverlay();
+      return;
+    }
+    const cur = this.currentScreen;
+    if (cur && cur.onBack() && this.stack.length > 1) {
+      this.playUiSample('menu-back', 0.6);
+      this.pop();
+    }
+  }
+
+  // ------------------------------------------------------------------ overlays
+
+  openOverlay(el: HTMLElement, opts: { onKey?: (e: KeyboardEvent) => boolean; onClose?: () => void } = {}): void {
+    el.style.pointerEvents = 'auto';
+    this.overlayLayer.appendChild(el);
+    this.overlays.push({ el, ...opts });
+  }
+
+  closeOverlay(el?: HTMLElement): void {
+    const idx = el ? this.overlays.findIndex(o => o.el === el) : this.overlays.length - 1;
+    if (idx < 0) return;
+    const [o] = this.overlays.splice(idx, 1);
+    o.el.remove();
+    o.onClose?.();
+  }
+
+  get hasOverlay(): boolean {
+    return this.overlays.length > 0;
+  }
+
+  toast(message: string, kind: 'info' | 'error' | 'success' = 'info', duration = 3500): void {
+    const el = h('div', { class: `toast ${kind}` }, message);
+    this.toastLayer.appendChild(el);
+    setTimeout(() => {
+      el.style.transition = 'opacity 0.3s';
+      el.style.opacity = '0';
+      setTimeout(() => el.remove(), 300);
+    }, duration);
+  }
+
+  private handleKeyDown(e: KeyboardEvent): void {
+    const target = e.target as HTMLElement | null;
+    const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') && (target as HTMLInputElement).type !== 'range' && (target as HTMLInputElement).type !== 'checkbox';
+    const top = this.overlays[this.overlays.length - 1];
+    if (top?.onKey && top.onKey(e)) {
+      e.preventDefault();
+      return;
+    }
+    if (e.code === 'Escape') {
+      e.preventDefault();
+      if (typing) (target as HTMLInputElement).blur();
+      this.back();
+      return;
+    }
+    if (typing && e.code !== 'Enter' && e.code !== 'ArrowUp' && e.code !== 'ArrowDown') return;
+    if (this.currentScreen?.onKeyDown(e)) e.preventDefault();
+  }
+
+  // ------------------------------------------------------------------ import
+
+  openFilePicker(): void {
+    this.fileInput.click();
+  }
+
+  openFolderPicker(): void {
+    this.folderInput.click();
+  }
+
+  /** Star rating for a native (nomod) beatmap, used when importing. */
+  starRater = (beatmap: Beatmap): number => {
+    const r = getRuleset(beatmap.rulesetId);
+    if (!r.starRating) return 0;
+    return r.starRating(r.createPlayable(beatmap, new ModSet()));
+  };
+
+  async importFiles(files: File[]): Promise<void> {
+    if (files.length === 0) return;
+    this.toast(`Importing ${files.length > 1 ? `${files.length} files` : files[0].name}…`);
+    try {
+      const result = await importFiles(files, this.starRater);
+      if (result.imported.length > 0) {
+        this.library.add(result.imported);
+        const count = result.imported.reduce((a, s) => a + s.beatmaps.length, 0);
+        this.toast(`Imported ${result.imported.length} beatmap set${result.imported.length > 1 ? 's' : ''} (${count} difficulties)`, 'success');
+        const first = result.imported[0];
+        this.select(first, first.beatmaps[0]);
+      }
+      for (const err of result.errors.slice(0, 3)) this.toast(err, 'error', 6000);
+      if (result.imported.length === 0 && result.errors.length === 0) this.toast('No beatmaps found in the selected files', 'error');
+    } catch (e) {
+      this.toast(`Import failed: ${e instanceof Error ? e.message : String(e)}`, 'error', 6000);
+    }
+  }
+
+  private setupDragDrop(): void {
+    let depth = 0;
+    window.addEventListener('dragenter', e => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      depth++;
+      this.root.classList.add('dragging');
+    });
+    window.addEventListener('dragleave', () => {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) this.root.classList.remove('dragging');
+    });
+    window.addEventListener('dragover', e => e.preventDefault());
+    window.addEventListener('drop', async e => {
+      e.preventDefault();
+      depth = 0;
+      this.root.classList.remove('dragging');
+      const items = e.dataTransfer?.items;
+      if (!items) return;
+      const files = await collectDroppedFiles(items);
+      void this.importFiles(files);
+    });
+  }
+
+  private setupFps(): void {
+    let frames = 0;
+    let last = performance.now();
+    const loop = () => {
+      frames++;
+      const now = performance.now();
+      if (now - last >= 500) {
+        if (settings.get('graphics.showFps', false)) this.fpsEl.textContent = `${Math.round((frames * 1000) / (now - last))} fps`;
+        else this.fpsEl.textContent = '';
+        frames = 0;
+        last = now;
+      }
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+}
+
+/** Reads dropped files, recursing into dropped directories (so a whole Songs folder can be dropped). */
+async function collectDroppedFiles(items: DataTransferItemList): Promise<File[]> {
+  const out: File[] = [];
+  const entries: FileSystemEntry[] = [];
+  for (const item of [...items]) {
+    const entry = item.webkitGetAsEntry?.();
+    if (entry) entries.push(entry);
+    else {
+      const f = item.getAsFile();
+      if (f) out.push(f);
+    }
+  }
+  const walk = async (entry: FileSystemEntry, path: string): Promise<void> => {
+    if (entry.isFile) {
+      const file = await new Promise<File>((res, rej) => (entry as FileSystemFileEntry).file(res, rej));
+      Object.defineProperty(file, 'relativePath', { value: path + file.name });
+      out.push(file);
+    } else if (entry.isDirectory) {
+      const reader = (entry as FileSystemDirectoryEntry).createReader();
+      let batch: FileSystemEntry[];
+      do {
+        batch = await new Promise<FileSystemEntry[]>((res, rej) => reader.readEntries(res, rej));
+        for (const e of batch) await walk(e, `${path}${entry.name}/`);
+      } while (batch.length > 0);
+    }
+  };
+  for (const e of entries) await walk(e, '');
+  return out;
+}

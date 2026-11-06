@@ -43,7 +43,7 @@ export interface GameplayContext {
   /** Report a judgement to the score / health processors. */
   applyResult(result: JudgementResult): void;
   /** Play hit samples. `pan` ranges from -1 (left) to 1 (right). */
-  playSamples(samples: readonly HitSampleInfo[], options?: { pan?: number; volume?: number }): void;
+  playSamples(samples: readonly HitSampleInfo[], options?: { pan?: number; volume?: number; rate?: number }): void;
   /** Start a looping sample, e.g. "sliderslide" or "spinnerspin". */
   startLoop(sample: HitSampleInfo, options?: { pan?: number; volume?: number }): LoopHandle | null;
   /** Whether a ruleset action is currently held. */

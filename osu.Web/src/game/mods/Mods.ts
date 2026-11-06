@@ -135,19 +135,21 @@ export class ModSet {
  */
 export function applyCommonDifficultyMods(d: BeatmapDifficulty, mods: ModSet, adjustCircleSize = true): BeatmapDifficulty {
   const out = d.clone();
+  // C# stores these as floats and multiplies in single precision.
+  const f = Math.fround;
   if (mods.has('EZ')) {
-    const ratio = 0.5;
-    if (adjustCircleSize) out.circleSize *= ratio;
-    out.approachRate *= ratio;
-    out.drainRate *= ratio;
-    out.overallDifficulty *= ratio;
+    const ratio = f(0.5);
+    if (adjustCircleSize) out.circleSize = f(out.circleSize * ratio);
+    out.approachRate = f(out.approachRate * ratio);
+    out.drainRate = f(out.drainRate * ratio);
+    out.overallDifficulty = f(out.overallDifficulty * ratio);
   }
   if (mods.has('HR')) {
-    const ratio = 1.4;
-    if (adjustCircleSize) out.circleSize = Math.min(out.circleSize * 1.3, 10.0); // CS uses a custom 1.3 ratio.
-    out.approachRate = Math.min(out.approachRate * ratio, 10.0);
-    out.drainRate = Math.min(out.drainRate * ratio, 10.0);
-    out.overallDifficulty = Math.min(out.overallDifficulty * ratio, 10.0);
+    const ratio = f(1.4);
+    if (adjustCircleSize) out.circleSize = Math.min(f(out.circleSize * f(1.3)), 10.0); // CS uses a custom 1.3 ratio.
+    out.approachRate = Math.min(f(out.approachRate * ratio), 10.0);
+    out.drainRate = Math.min(f(out.drainRate * ratio), 10.0);
+    out.overallDifficulty = Math.min(f(out.overallDifficulty * ratio), 10.0);
   }
   return out;
 }
