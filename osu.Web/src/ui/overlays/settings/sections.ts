@@ -255,8 +255,8 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
       {
         header: 'General',
         items: [
-          check('Rotate cursor when dragging', 'ui.cursorRotation', { unavailable: true }),
-          slider('Menu cursor size', 'ui.menuCursorSize', 0.5, 2, 0.01, { keyboardStep: 0.01, format: v => `${v.toFixed(2)}x`, unavailable: true }),
+          check('Rotate cursor when dragging', 'ui.cursorRotation'),
+          slider('Menu cursor size', 'ui.menuCursorSize', 0.5, 2, 0.01, { keyboardStep: 0.01, format: v => `${v.toFixed(2)}x` }),
           slider('Parallax', 'ui.parallax', 0, 2, 0.1, { percent: true }),
           slider('Hold-to-confirm activation time', 'ui.holdActivationDelay', 0, 500, 50, { keyboardStep: 50, format: v => `${v} ms`, keywords: ['delay'] }),
         ],
@@ -418,7 +418,7 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
         header: 'Layout',
         items: [
           settingsItem(formDropdown('Screen mode', fullscreen, [['windowed', 'Windowed'], ['fullscreen', 'Fullscreen']] as const, { unavailable: canFullscreen ? undefined : NA }), { showRevert: false, unavailable: canFullscreen ? undefined : NA }),
-          slider('UI scaling', 'graphics.uiScale', 0.8, 1.6, 0.01, { keyboardStep: 0.01, format: v => `${v.toFixed(2)}x`, keywords: ['scale', 'letterbox'], unavailable: true }),
+          slider('UI scaling', 'graphics.uiScale', 0.8, 1.6, 0.01, { keyboardStep: 0.01, format: v => `${v.toFixed(2)}x`, keywords: ['scale', 'letterbox'] }),
         ],
       },
       {

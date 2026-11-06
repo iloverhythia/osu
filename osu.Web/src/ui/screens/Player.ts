@@ -78,6 +78,11 @@ export class PlayerScreen extends Screen {
   private loaderSettingsHovered = false;
   private replaySettings: HTMLElement | null = null;
 
+  /** GlobalCursorDisplay: the playfield's cursor (osu!) replaces the menu cursor during gameplay. */
+  get cursorVisible(): boolean {
+    return !(this.gameplayStarted && this.drawable?.providesCursor && !this.paused && !this.failed && !this.resultsShown);
+  }
+
   screenshotLayers(): HTMLCanvasElement[] {
     if (!this.gameplayStarted) return [];
     // The background layer, its (CSS) dim, then the gameplay canvas.

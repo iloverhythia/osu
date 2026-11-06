@@ -232,6 +232,7 @@ export class DrawableOsuRuleset implements DrawableRuleset {
 
   /** Cursor in osu! playfield coordinates. */
   private cursor: Vec2 = { x: PLAYFIELD_WIDTH / 2, y: 384 / 2 };
+  readonly providesCursor = true;
   private pressed = new Set<Action>();
   private readonly showRipples: boolean;
   private readonly borderStyle: string;

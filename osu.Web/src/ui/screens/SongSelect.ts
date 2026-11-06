@@ -195,6 +195,7 @@ export class SongSelectScreen extends Screen {
     this.footer.setButtons([this.modsButton, this.randomButton, this.optionsButton]);
     settings.subscribe(k => {
       if (k === 'select.backgroundBlur') this.updateBackgroundBlur();
+      if (k === 'graphics.uiScale') this.onResize();
     });
 
     // ---------------------------------------------------------------- layout
@@ -355,6 +356,8 @@ export class SongSelectScreen extends Screen {
     let scale = Math.min(W / 1024, H / 768);
     const portrait = W < H;
     if (portrait) scale = Math.min(1, W / 560);
+    // ScalingDrawSizePreservingFillContainer: × OsuSetting.UIScale.
+    scale *= settings.get('graphics.uiScale', 1);
     this.drawSize = { w: W / scale, h: H / scale, scale };
     this.scaleRoot.style.width = `${this.drawSize.w}px`;
     this.scaleRoot.style.height = `${this.drawSize.h}px`;

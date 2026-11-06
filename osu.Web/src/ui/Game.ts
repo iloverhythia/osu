@@ -2,6 +2,7 @@
 // The top-level game (OsuGame equivalent): screen stack, background, global audio, overlays and import handling.
 
 import { VolumeOverlay } from './overlays/VolumeOverlay';
+import { MenuCursor } from './MenuCursor';
 import { APP_NAME } from '../brand';
 import { AudioEngine, Track } from '../framework/audio/AudioEngine';
 import { settings } from '../framework/Settings';
@@ -30,6 +31,7 @@ export class Game {
   private readonly bgB: HTMLDivElement;
   private readonly bgParallax: HTMLDivElement;
   readonly volume: VolumeOverlay;
+  private readonly menuCursor: MenuCursor;
   private muted = false;
   private parallax = { x: 0, y: 0, scale: 1, mouse: null as { x: number; y: number } | null };
   private bgFront: 'A' | 'B' = 'A';
@@ -106,6 +108,8 @@ export class Game {
     this.library.subscribe(() => this.scheduleStarBackfill());
     this.volume = new VolumeOverlay(this);
     root.appendChild(this.volume.el);
+    this.menuCursor = new MenuCursor(this);
+    root.appendChild(this.menuCursor.el);
     window.addEventListener('wheel', this.onWheel, { passive: false });
   }
 

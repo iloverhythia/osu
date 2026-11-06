@@ -72,6 +72,8 @@ export interface PlayableBeatmap<T = unknown> {
 }
 
 export interface DrawableRuleset {
+  /** Playfield provides its own gameplay cursor (osu!), hiding the menu cursor (ICursorProvider). */
+  readonly providesCursor?: boolean;
   /** Advance gameplay to `time` (ms). Judgements are emitted through the context. */
   update(time: number, elapsed: number): void;
   /** Draw into a canvas sized `width` x `height` CSS pixels (context is already DPR-scaled). */

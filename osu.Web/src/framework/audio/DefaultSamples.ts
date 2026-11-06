@@ -297,6 +297,11 @@ const generic: Record<string, SampleDef> = {
     duration: 0.08,
     synth: (c, o) => tone(c, o, 'sine', 1400, 0.2, 0.001, 0.05, 0, 900),
   },
+  // UI/cursor-tap (MenuCursorContainer)
+  'cursor-tap': {
+    duration: 0.04,
+    synth: (c, o) => tone(c, o, 'sine', 900, 0.1, 0.0005, 0.03, 0, 600),
+  },
   // UI/notch-tick (VolumeMeter / slider notches): a short soft click.
   'notch-tick': {
     duration: 0.03,

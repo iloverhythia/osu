@@ -10,6 +10,11 @@ export abstract class Screen {
   /** Canvases making up the screen, bottom to top, for F12 screenshots (null when the screen isn't canvas-drawn). */
   screenshotLayers?(): HTMLCanvasElement[];
 
+  /** Whether the menu cursor is shown (the osu! ruleset provides its own cursor during gameplay). */
+  get cursorVisible(): boolean {
+    return true;
+  }
+
   /** Whether the mouse wheel adjusts the volume over this screen (ScrollAdjustsVolume). */
   get scrollAdjustsVolume(): boolean {
     return false;

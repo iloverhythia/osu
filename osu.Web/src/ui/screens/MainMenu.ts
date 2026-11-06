@@ -269,7 +269,7 @@ export class MainMenuScreen extends Screen {
     const sh = this.el.clientHeight;
     if (sw === 0 || sh === 0) return;
     // Lazer lays the menu out in fixed "osu! pixels" at UI scale 1; scale it down on small (phone) screens.
-    const uiScale = Math.min(1, sw / 960, sh / 560);
+    const uiScale = Math.min(1, sw / 960, sh / 560) * settings.get('graphics.uiScale', 1);
     const w = sw / uiScale;
     const h = sh / uiScale;
     this.content.style.width = `${w}px`;
