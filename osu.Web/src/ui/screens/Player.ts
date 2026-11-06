@@ -8,6 +8,7 @@ import { audioSettings, getBeatmapOffset, inputSettings, lastLocalPlay, playback
 import { affectsUnstableRate } from '../ranking/RankingLogic';
 import { Database } from '../../game/storage/Database';
 import { GameplayLeaderboard } from '../hud/GameplayLeaderboard';
+import { Profiles } from '../../game/Profiles';
 import { getDisplayScore } from '../../game/scoring/DisplayScore';
 import type { AudioEngine, LoopingSample, Track } from '../../framework/audio/AudioEngine';
 import { GameplayClock } from '../../framework/audio/GameplayClock';
@@ -104,6 +105,27 @@ export class PlayerScreen extends Screen {
 
   get blocksWheel(): boolean {
     return !this.scrollAdjustsVolume;
+  }
+
+  private playRecorded = false;
+
+  /** UserStatistics: play count, total score, hits and play time for the current profile (own plays only). */
+  private recordProfilePlay(): void {
+    if (this.playRecorded || !this.gameplayStarted) return;
+    this.playRecorded = true;
+    if (this.replay) {
+      Profiles.recordReplayWatched(this.ruleset.id);
+      return;
+    }
+    if (this.playback || this.autoplayInternal) return;
+    const sp = this.scoreProcessor;
+    Profiles.recordPlay(this.ruleset.id, {
+      totalScore: sp.totalScore,
+      statistics: sp.statistics,
+      maximumStatistics: sp.maximumStatistics,
+      maxCombo: sp.highestCombo,
+      playTime: Math.max(0, (this.clock?.currentTime ?? 0) - this.gameplayStart) / this.mods.rate,
+    });
   }
 
   /** Player.BackgroundParallaxAmount */
@@ -589,6 +611,7 @@ export class PlayerScreen extends Screen {
   /** Player.PerformFail */
   private performFail(): void {
     this.failed = true;
+    this.recordProfilePlay();
     this.scoreProcessor.fail();
     if (this.pauseMenu.visible) this.pauseMenu.hide();
     this.cancelResume();
@@ -1222,6 +1245,7 @@ export class PlayerScreen extends Screen {
         : this.replay,
       isReplay: this.replay != null,
     };
+    this.recordProfilePlay();
     // SubmittingPlayer: SessionStatics.LastLocalUserScore (used by BeatmapOffsetControl's calibration).
     if (!result.isReplay && !this.mods.isAutoplay) {
       lastLocalPlay.value = {

@@ -61,6 +61,8 @@ export interface ScoreRecord {
   date: number;
   pp?: number;
   player: string;
+  /** The offline profile that set the score (older scores are matched by player name). */
+  profileId?: string;
   hasReplay?: boolean;
 }
 
@@ -129,6 +131,12 @@ export const Database = {
   async addScore(score: ScoreRecord): Promise<number> {
     const db = await open();
     return wrap(db.transaction('scores', 'readwrite').objectStore('scores').add(score)) as Promise<number>;
+  },
+
+  /** Updates a stored score (e.g. to fill in its pp). */
+  async putScore(score: ScoreRecord): Promise<void> {
+    const db = await open();
+    await wrap(db.transaction('scores', 'readwrite').objectStore('scores').put(score));
   },
 
   async getAllScores(): Promise<ScoreRecord[]> {

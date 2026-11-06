@@ -324,7 +324,7 @@ export class BeatmapTitleWedge {
     this.currentArtist = (uni && e.artistUnicode) || e.artist;
     this.title.set(this.currentTitle);
     this.artist.set(this.currentArtist);
-    updateStatusPill(this.pill, ((e as { status?: BeatmapOnlineStatus }).status ?? BeatmapOnlineStatus.None) as BeatmapOnlineStatus, true, this.host.colours);
+    updateStatusPill(this.pill, ((e as { status?: BeatmapOnlineStatus }).status ?? BeatmapOnlineStatus.Ranked) as BeatmapOnlineStatus, true, this.host.colours);
     tween(this.ratingRow, { opacity: '1' }, 300, Easing.OutQuint);
     this.difficultyText.textContent = e.difficultyName;
     this.mapperText.textContent = e.creator;
@@ -806,7 +806,7 @@ function scoreRow(host: SongSelectHost, s: ScoreRecord, rank: number): HTMLDivEl
       h('div', { class: 'lbs-fg', style: { background: css(fg, 0.4) } }),
       h('div', { class: 'lbs-avatar' }, h('span', { class: 'lbs-unshear' }, (s.player || '?').slice(0, 1).toUpperCase())),
       h('div', { class: 'lbs-info' }, h('div', { class: 'lbs-unshear lbs-date', style: { color: css(c.content2) } }, shortRelativeTime(s.date)), h('div', { class: 'lbs-unshear lbs-username' }, s.player)),
-      h('div', { class: 'lbs-stats lbs-unshear' }, label('COMBO', `${s.maxCombo}x`, perfectCombo, 60), label('ACCURACY', `${(Math.floor(s.accuracy * 10000) / 100).toFixed(2)}%`, s.accuracy === 1, 55)),
+      h('div', { class: 'lbs-stats lbs-unshear' }, label('COMBO', `${s.maxCombo}x`, perfectCombo, 60), label('ACCURACY', `${(Math.floor(s.accuracy * 10000) / 100).toFixed(2)}%`, s.accuracy === 1, 55), s.pp != null ? label('PP', `${Math.round(s.pp)}`, false, 40) : null),
     ),
     h(
       'div',

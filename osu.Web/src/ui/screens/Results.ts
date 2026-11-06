@@ -3,6 +3,8 @@
 // skinnable Screens/RankingV2 one isn't used by default). The leaderboard shown beside the new score is the local one
 // (stored scores for this beatmap + ruleset), as SoloResultsScreen shows for the local scope.
 
+import { calculatePerformance } from '../../game/scoring/Performance';
+import { Profiles } from '../../game/Profiles';
 import { settings } from '../../framework/Settings';
 import type { WorkingBeatmap } from '../../game/beatmaps/WorkingBeatmap';
 import type { ModSet } from '../../game/mods/Mods';
@@ -65,12 +67,10 @@ function perfScore(statistics: ReadonlyMap<HitResult, number>, maxCombo: number,
   } as PerfScore;
 }
 
-/** Performance points (only implemented for osu! standard). */
+/** Performance points (PerformanceCalculator for the score's ruleset). */
 export function computePp(r: PlayResult): number | undefined {
-  if (r.ruleset.id !== 0) return undefined;
   try {
-    const attributes = calculateOsuDifficulty(r.playable as OsuPlayableBeatmap);
-    return calculateOsuPerformance(attributes, perfScore(r.statistics, r.maxCombo, r.accuracy), r.mods);
+    return calculatePerformance(r.ruleset.id, r.playable, { statistics: r.statistics, maxCombo: r.maxCombo, accuracy: r.accuracy, mods: r.mods });
   } catch {
     return undefined;
   }
@@ -251,6 +251,7 @@ export class ResultsScreen extends Screen {
         date: r.date,
         pp: computePp(r),
         player: settings.get('ui.username', 'Guest'),
+        profileId: Profiles.current().id,
         hasReplay: !!r.replay,
       });
       this.current.recordId = id;
@@ -293,8 +294,12 @@ export class ResultsScreen extends Screen {
   private async performance(score: ScoreView): Promise<number | undefined> {
     if (score.pp !== undefined) return score.pp;
     const d = await this.difficulty(score);
-    if (!d?.attributes) return undefined;
-    return calculateOsuPerformance(d.attributes, perfScore(score.statistics, score.maxCombo, score.accuracy), score.mods);
+    if (!d) return undefined;
+    try {
+      return calculatePerformance(score.ruleset.id, d.playable, { statistics: score.statistics, maxCombo: score.maxCombo, accuracy: score.accuracy, mods: score.mods });
+    } catch {
+      return undefined;
+    }
   }
 
   /** PerformanceBreakdownChart.computePerformance: the score's performance and a perfect score's (BeatmapDifficultyCache). */

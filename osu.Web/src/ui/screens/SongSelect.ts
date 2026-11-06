@@ -32,6 +32,7 @@ import { FilterControl, HEIGHT_FROM_SCREEN_TOP } from '../select/FilterControl';
 import type { FilterBeatmap, FilterCriteria } from '../select/FilterCriteria';
 import { FooterButtonMods, FooterButtonOptions, FooterButtonRandom, OptionsEntry, ScreenFooter, FOOTER_HEIGHT } from '../select/Footer';
 import { rulesetIcon } from '../select/Icons';
+import { userButton } from '../overlays/Profile';
 import { BeatmapDetailsArea, BeatmapTitleWedge, CORNER_RADIUS_HIDE_OFFSET, NoResultsPlaceholder, SongSelectHost } from '../select/Wedges';
 
 /** SongSelect.SELECTION_DEBOUNCE */
@@ -215,6 +216,7 @@ export class SongSelectScreen extends Screen {
       h('button', { class: 'ss-toolbar-button ss-toolbar-generate', title: 'Generate a beatmap for any mode from a song (Ctrl+G)', onclick: () => this.openGenerator() }, '✦ Generate chart'),
       h('div', { class: 'ss-toolbar-spacer' }),
       this.rulesetTabs,
+      userButton(this.game),
     );
 
     const wedges = h('div', { class: 'ss-wedges' }, this.titleWedge.el, h('div', { class: 'ss-wedge-gap' }), this.detailsArea.el);

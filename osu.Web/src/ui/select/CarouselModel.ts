@@ -115,7 +115,7 @@ export class CarouselModelBuilder {
       id: record.id,
       onlineId: record.onlineId,
       metadata: metadataOf(first),
-      status: first.status ?? BeatmapOnlineStatus.None,
+      status: first.status ?? BeatmapOnlineStatus.Ranked,
       dateAdded: record.addedAt,
       dateRanked: first.dateRanked ?? null,
       dateSubmitted: first.dateSubmitted ?? null,
@@ -137,7 +137,7 @@ export class CarouselModelBuilder {
         length: entry.length,
         bpm: entry.bpm,
         beatDivisor: 4,
-        status: BeatmapOnlineStatus.None,
+        status: BeatmapOnlineStatus.Ranked,
         lastPlayed: null,
         hidden: HiddenBeatmaps.isHidden(entry.hash),
         md5Hash: collectionKey(entry),
@@ -157,7 +157,7 @@ export class CarouselModelBuilder {
     b.starRating = e.stars ?? 0;
     b.beatDivisor = e.beatDivisor ?? 4;
     b.endTimeObjectCount = e.endTimeObjectCount ?? -1;
-    b.status = e.status ?? BeatmapOnlineStatus.None;
+    b.status = e.status ?? BeatmapOnlineStatus.Ranked;
     b.md5Hash = collectionKey(e);
     b.hidden = HiddenBeatmaps.isHidden(e.hash);
     b.lastPlayed = getLastPlayed(e.hash);
