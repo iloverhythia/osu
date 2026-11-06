@@ -2,6 +2,7 @@
 // Maps the stored beatmap library (BeatmapSetRecord / BeatmapEntry) onto the filter model used by the ported carousel filters
 // (the role Realm's BeatmapInfo / BeatmapSetInfo play in lazer), and keeps the "last played" timestamps lazer stores on BeatmapInfo.
 
+import { collectionKey, HiddenBeatmaps } from '../../game/Collections';
 import { RULESETS } from '../../game/rulesets';
 import type { BeatmapEntry, BeatmapSetRecord } from '../../game/storage/Database';
 import { BeatmapOnlineStatus, FilterBeatmap, FilterBeatmapSet, FilterMetadata, FilterRuleset } from './FilterCriteria';
@@ -138,8 +139,8 @@ export class CarouselModelBuilder {
         beatDivisor: 4,
         status: BeatmapOnlineStatus.None,
         lastPlayed: null,
-        hidden: false,
-        md5Hash: entry.md5 ?? '',
+        hidden: HiddenBeatmaps.isHidden(entry.hash),
+        md5Hash: collectionKey(entry),
         endTimeObjectCount: -1,
         totalObjectCount: entry.objectCount,
       };
@@ -157,7 +158,8 @@ export class CarouselModelBuilder {
     b.beatDivisor = e.beatDivisor ?? 4;
     b.endTimeObjectCount = e.endTimeObjectCount ?? -1;
     b.status = e.status ?? BeatmapOnlineStatus.None;
-    b.md5Hash = e.md5 ?? '';
+    b.md5Hash = collectionKey(e);
+    b.hidden = HiddenBeatmaps.isHidden(e.hash);
     b.lastPlayed = getLastPlayed(e.hash);
   }
 }

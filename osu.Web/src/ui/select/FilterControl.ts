@@ -3,6 +3,7 @@
 // count, star difficulty range slider, "show converts" toggle, sort / group / collection dropdowns, and creation of FilterCriteria.
 
 import { settings } from '../../framework/Settings';
+import { Collections } from '../../game/Collections';
 import type { ModSet } from '../../game/mods/Mods';
 import type { Ruleset } from '../../game/rulesets/Ruleset';
 import { h } from '../dom';
@@ -28,9 +29,14 @@ export interface FilterControlHost {
   ruleset(): Ruleset;
   mods(): ModSet;
   unscope(): void;
+  /** ManageCollectionsDialog.Show */
+  manageCollections(): void;
 }
 
+const MANAGE_COLLECTIONS = '__manage__';
+
 export class FilterControl {
+  private collectionId = 'all';
   readonly el: HTMLDivElement;
   readonly search: HTMLInputElement;
   private readonly status: HTMLDivElement;
@@ -76,8 +82,29 @@ export class FilterControl {
       this.updateCriteria();
     });
     this.updateGroupItems();
-    const collection = new ShearedDropdown<string>('Collection', [{ value: 'all', text: 'All beatmaps' }], 'all', () => undefined);
+    // CollectionDropdown: "All beatmaps", every collection (by name) and "Manage collections...".
+    const collection = new ShearedDropdown<string>('Collection', [], 'all', v => {
+      if (v === MANAGE_COLLECTIONS) {
+        collection.value = this.collectionId;
+        host.manageCollections();
+        return;
+      }
+      this.collectionId = v;
+      this.updateCriteria();
+    });
     collection.el.classList.add('collection');
+    const refreshCollections = () => {
+      const all = Collections.all();
+      if (this.collectionId !== 'all' && !all.some(c => c.id === this.collectionId)) this.collectionId = 'all';
+      collection.setItems([{ value: 'all', text: 'All beatmaps' }, ...all.map(c => ({ value: c.id, text: c.name })), { value: MANAGE_COLLECTIONS, text: 'Manage collections...' }]);
+      collection.value = this.collectionId;
+    };
+    refreshCollections();
+    settings.subscribe(k => {
+      if (k !== 'collections') return;
+      refreshCollections();
+      if (this.collectionId !== 'all') this.updateCriteria();
+    });
 
     this.scopedText = h('div', { class: 'scoped-text', style: { color: css(c.background6) } });
     this.scopedDisplay = h(
@@ -143,6 +170,7 @@ export class FilterControl {
     criteria.allowConvertedBeatmaps = this.allowConverts;
     criteria.ruleset = { shortName: r.shortName, onlineId: r.id };
     criteria.mods = this.host.mods().forRuleset(r.shortName, r.availableMods).list;
+    if (this.collectionId !== 'all') criteria.collectionBeatmapMD5Hashes = new Set(Collections.get(this.collectionId)?.hashes ?? []);
 
     if (this.slider.lower !== STARS_MIN_DEFAULT) criteria.userStarDifficulty.min = this.slider.lower;
     if (this.slider.upper !== STARS_MAX_DEFAULT) criteria.userStarDifficulty.max = this.slider.upper;

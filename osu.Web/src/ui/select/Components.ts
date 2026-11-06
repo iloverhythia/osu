@@ -210,32 +210,72 @@ export interface MenuItem {
   type?: 'standard' | 'highlighted' | 'destructive';
   spacer?: boolean;
   icon?: string;
+  /** Child items (an OsuMenuItem with Items opens a sub-menu). */
+  items?: MenuItem[];
+  /** ToggleMenuItem state (shows a check box). */
+  checked?: boolean;
 }
 
 let openMenu: HTMLElement | null = null;
 
+function buildMenu(items: MenuItem[], close: () => void): HTMLElement {
+  let sub: HTMLElement | null = null;
+  const menu = h('div', { class: 'ss-context-menu' });
+  for (const i of items) {
+    if (i.spacer) {
+      menu.appendChild(h('div', { class: 'cm-spacer' }));
+      continue;
+    }
+    const el = h(
+      'div',
+      { class: `cm-item ${i.type ?? 'standard'}${i.items ? ' has-items' : ''}${i.checked != null ? ' cm-toggle' : ''}` },
+      i.checked != null ? h('span', { class: `cm-check${i.checked ? ' on' : ''}` }, i.checked ? '✓' : '') : null,
+      h('span', { class: 'cm-text' }, i.text),
+      i.items ? h('span', { class: 'cm-arrow' }, '›') : null,
+    );
+    const openSub = () => {
+      sub?.remove();
+      sub = null;
+      if (!i.items) return;
+      sub = buildMenu(i.items, close);
+      sub.classList.add('cm-sub');
+      menu.appendChild(sub);
+      const r = el.getBoundingClientRect();
+      sub.style.position = 'fixed';
+      sub.style.left = `${r.right - 2}px`;
+      sub.style.top = `${r.top - 4}px`;
+      const sr = sub.getBoundingClientRect();
+      if (sr.right > innerWidth) sub.style.left = `${Math.max(0, r.left - sr.width + 2)}px`;
+      if (sr.bottom > innerHeight) sub.style.top = `${Math.max(0, innerHeight - sr.height)}px`;
+    };
+    el.addEventListener('pointerenter', () => {
+      if (i.items) openSub();
+      else if (sub && !sub.contains(el)) {
+        sub.remove();
+        sub = null;
+      }
+    });
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      if (i.items) {
+        openSub();
+        return;
+      }
+      close();
+      i.action?.();
+    });
+    menu.appendChild(el);
+  }
+  return menu;
+}
+
 export function showContextMenu(x: number, y: number, items: MenuItem[], host: HTMLElement = document.body): void {
   openMenu?.remove();
-  const menu = h(
-    'div',
-    { class: 'ss-context-menu' },
-    items.map(i =>
-      i.spacer
-        ? h('div', { class: 'cm-spacer' })
-        : h(
-            'div',
-            {
-              class: `cm-item ${i.type ?? 'standard'}`,
-              onclick: () => {
-                menu.remove();
-                openMenu = null;
-                i.action?.();
-              },
-            },
-            i.text,
-          ),
-    ),
-  );
+  const close = () => {
+    menu.remove();
+    if (openMenu === menu) openMenu = null;
+  };
+  const menu = buildMenu(items, close);
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
   host.appendChild(menu);

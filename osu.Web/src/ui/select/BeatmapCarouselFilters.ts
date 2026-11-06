@@ -387,6 +387,8 @@ export interface GroupingContext {
   getLocalUserTopRanks?: (criteria: FilterCriteria) => ReadonlyMap<string, ScoreRank>;
   /** Ruleset variant support (mania key counts). */
   getVariant?: (beatmap: FilterBeatmap, criteria: FilterCriteria) => { variant: number; name: string } | null;
+  /** BeatmapCarousel.GetAllCollections (ordered): name + beatmap MD5 hashes. */
+  getCollections?: () => { name: string; hashes: readonly string[] }[];
   /** Date.now() override for tests. */
   now?: number;
 }
@@ -492,12 +494,14 @@ function getGroups(items: FilterBeatmap[], criteria: FilterCriteria, context: Gr
   const now = context.now ?? Date.now();
 
   switch (criteria.group) {
+    case GroupMode.Collections:
+      return defineGroupsByCollection(items, context.getCollections?.() ?? []);
+
     case GroupMode.None:
-    case GroupMode.Collections: // no collections exist in this port
     case GroupMode.Favourites: // favourites are online-only
     case GroupMode.MyMaps: // no logged-in user
       if (criteria.group === GroupMode.None) return [{ group: null, itemsInGroup: items }];
-      return criteria.group === GroupMode.Collections ? getGroupsBy(() => [new GroupDefinition(Number.MAX_SAFE_INTEGER, 'Not in collection')], items) : [];
+      return [];
 
     case GroupMode.Artist:
       return getGroupsBy(b => defineGroupAlphabetically(b.set.metadata.artist), items);
@@ -555,6 +559,30 @@ function getGroups(items: FilterBeatmap[], criteria: FilterCriteria, context: Gr
     default:
       throw new Error('Unknown group mode');
   }
+}
+
+/** BeatmapCarouselFilterGrouping.defineGroupsByCollection: a beatmap appears under every collection containing its MD5. */
+function defineGroupsByCollection(items: FilterBeatmap[], collections: { name: string; hashes: readonly string[] }[]): GroupMapping[] {
+  const mappings: GroupMapping[] = [];
+  const md5ToCollections = new Map<string, GroupMapping[]>();
+  collections.forEach((c, i) => {
+    const mapping: GroupMapping = { group: new GroupDefinition(i, c.name), itemsInGroup: [] };
+    mappings.push(mapping);
+    for (const md5 of c.hashes) {
+      let list = md5ToCollections.get(md5);
+      if (!list) md5ToCollections.set(md5, (list = []));
+      list.push(mapping);
+    }
+  });
+  const notInCollection: GroupMapping = { group: new GroupDefinition(Number.MAX_SAFE_INTEGER, 'Not in collection'), itemsInGroup: [] };
+  mappings.push(notInCollection);
+  for (const item of items) {
+    if (!item.md5Hash) continue;
+    const list = md5ToCollections.get(item.md5Hash);
+    if (list) for (const m of list) m.itemsInGroup.push(item);
+    else notInCollection.itemsInGroup.push(item);
+  }
+  return mappings.filter(m => m.itemsInGroup.length > 0).sort((a, b) => a.group!.order - b.group!.order);
 }
 
 function getGroupsBy(defineGroups: (b: FilterBeatmap) => GroupDefinition[], items: FilterBeatmap[]): GroupMapping[] {

@@ -6,6 +6,7 @@
 
 import '../select/select.css';
 import { settings } from '../../framework/Settings';
+import { collectionKey, Collections, HiddenBeatmaps } from '../../game/Collections';
 import { RULESET_DISPLAY_NAMES } from '../../brand';
 import { ModSet } from '../../game/mods/Mods';
 import { availableRulesets } from '../../game/rulesets';
@@ -17,6 +18,7 @@ import type { Game } from '../Game';
 import { openModSelect } from '../overlays/ModSelect';
 import { openSettings } from '../overlays/Settings';
 import { openChartGenerator } from '../overlays/ChartGenerator';
+import { openManageCollections } from '../overlays/ManageCollections';
 import { Screen } from '../Screen';
 import { confirmDialog } from '../confirm';
 import { PlayerScreen } from './Player';
@@ -147,6 +149,7 @@ export class SongSelectScreen extends Screen {
         playSample: name => this.game.playUiSample(name === 'random' ? 'menu-confirm' : 'menu-click', name === 'traverse' ? 0.25 : 0.4),
         groupingContext: () => ({
           getLocalUserTopRanks: () => this.topRankMapping(),
+          getCollections: () => Collections.all(),
           getVariant: (b, criteria) => (this.game.ruleset.id === 3 ? { variant: ManiaFilterCriteria.keyCountFor(b, criteria.mods), name: `${ManiaFilterCriteria.keyCountFor(b, criteria.mods)}K` } : null),
         }),
       },
@@ -157,6 +160,7 @@ export class SongSelectScreen extends Screen {
       ruleset: () => this.game.ruleset,
       mods: () => this.game.mods,
       unscope: () => this.unscopeBeatmapSet(true),
+      manageCollections: () => openManageCollections(this.game),
     });
     this.filterControl.onCriteriaChanged = c => this.criteriaChanged(c);
     this.filterControl.search.addEventListener('keydown', e => this.onSearchKeyDown(e));
@@ -196,6 +200,8 @@ export class SongSelectScreen extends Screen {
     settings.subscribe(k => {
       if (k === 'select.backgroundBlur') this.updateBackgroundBlur();
       if (k === 'graphics.uiScale') this.onResize();
+      // Collections / hidden difficulties change carousel contents and grouping.
+      if (k === 'collections' || k === 'beatmaps.hidden') this.libraryChanged();
     });
 
     // ---------------------------------------------------------------- layout
@@ -791,7 +797,7 @@ export class SongSelectScreen extends Screen {
     // BeatmapDeleteDialog
     if (!(await confirmDialog(this.game, `Confirm deletion of ${e.artist} - ${e.title} (${e.creator})`, 'Yes. Totally. Delete it.'))) return;
     if (this.game.working?.set.id === record.id) this.game.working = null;
-    await this.game.library.remove(record.id);
+    this.game.library.softDelete(record.id);
     this.game.toast('Beatmap set deleted');
   }
 
@@ -834,13 +840,21 @@ export class SongSelectScreen extends Screen {
   private forwardActions(b: FilterBeatmap): MenuItem[] {
     const played = getLastPlayed(b.id) != null;
     const src = this.model.sources.get(b);
+    // SongSelect.CreateCollectionMenuActions: a toggle per collection plus "Manage".
+    const key = src ? collectionKey(src.entry) : b.md5Hash;
+    const collectionItems: MenuItem[] = [
+      ...Collections.all().map(c => ({ text: c.name, checked: c.hashes.includes(key), action: () => Collections.toggle(c.id, key, !c.hashes.includes(key)) })),
+      { text: 'Manage', action: () => openManageCollections(this.game) },
+    ];
     return [
       { text: 'Play', type: 'highlighted', icon: 'check', action: () => this.selectAndRun(b) },
       { text: '', spacer: true },
+      { text: 'Collections', items: collectionItems },
       played
         ? { text: 'Remove from played', icon: 'timesCircle', action: () => (setLastPlayed(b.id, null), this.libraryChanged()) }
         : { text: 'Mark as played', icon: 'timesCircle', action: () => (setLastPlayed(b.id, Date.now()), this.libraryChanged()) },
       { text: 'Clear all local scores', type: 'destructive', icon: 'eraser', action: () => void this.clearLocalScores(src?.entry.hash ?? b.id) },
+      ...(src && HiddenBeatmaps.canHide(src.set.beatmaps.map(x => x.hash), src.entry.hash) ? [{ text: 'Hide', action: () => HiddenBeatmaps.hide(src.entry.hash) }] : []),
     ];
   }
 
@@ -868,7 +882,23 @@ export class SongSelectScreen extends Screen {
     else if (m instanceof GroupedBeatmapSet) {
       const record = this.model.recordFor(m.beatmapSet.id);
       if (!item.isExpanded) items.push({ text: 'Expand', type: 'highlighted', action: () => this.carousel.activate(item) }, { text: '', spacer: true });
-      if (record) items.push({ text: 'Delete...', type: 'destructive', action: () => void this.deleteSet(record) });
+      if (record) {
+        // PanelBeatmapSet: Collections (all difficulties toggled together), Restore all hidden, Delete.
+        const keys = record.beatmaps.map(e => collectionKey(e));
+        items.push({
+          text: 'Collections',
+          items: [
+            ...Collections.all().map(c => {
+              const inCount = keys.filter(k => c.hashes.includes(k)).length;
+              const all = inCount === keys.length;
+              return { text: `${c.name}${inCount > 0 && !all ? ' (partial)' : ''}`, checked: all, action: () => keys.forEach(k => Collections.toggle(c.id, k, !all)) };
+            }),
+            { text: 'Manage', action: () => openManageCollections(this.game) },
+          ],
+        });
+        if (record.beatmaps.some(e => HiddenBeatmaps.isHidden(e.hash))) items.push({ text: 'Restore all hidden', action: () => HiddenBeatmaps.restoreSet(record.beatmaps.map(e => e.hash)) });
+        items.push({ text: 'Delete...', type: 'destructive', action: () => void this.deleteSet(record) });
+      }
     } else if (m instanceof GroupedBeatmap) items = this.forwardActions(m.beatmap);
     if (items.length > 0) showContextMenu(e.clientX, e.clientY, items);
   }

@@ -2724,3 +2724,53 @@
 .ss-toolbar-generate {
   color: #d9b8ff;
 }
+
+/* OsuMenuItem sub-menus and ToggleMenuItem check boxes */
+.cm-item.has-items,
+.cm-item.cm-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cm-item .cm-text {
+  flex: 1;
+}
+
+.cm-arrow {
+  opacity: 0.7;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.cm-check {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 10px;
+  text-align: center;
+  opacity: 0.8;
+}
+
+.cm-check.on {
+  background: currentColor;
+  color: #222;
+  opacity: 1;
+}
+
+.ss-context-menu.cm-sub {
+  z-index: 1001;
+}
+
+.ss-context-menu .cm-check {
+  flex: none;
+  display: inline-block;
+  background: transparent;
+  box-sizing: border-box;
+}
+
+.ss-context-menu .cm-check.on {
+  background: currentColor;
+}

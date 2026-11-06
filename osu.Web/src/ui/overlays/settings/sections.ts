@@ -10,6 +10,7 @@ import { settings } from '../../../framework/Settings';
 import { availableRulesets } from '../../../game/rulesets';
 import { ACTIVE_SKIN_SETTING, deleteSkin, listSkins, SkinStore, type SkinInfo } from '../../../game/skinning';
 import { Database } from '../../../game/storage/Database';
+import { Collections, HiddenBeatmaps } from '../../../game/Collections';
 import { confirmDialog } from '../../confirm';
 import { h } from '../../dom';
 import type { Game } from '../../Game';
@@ -507,12 +508,31 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
             },
             { dangerous: true },
           ),
-          button('Restore all hidden difficulties', () => {}, { unavailable: true }),
-          button('Restore all recently deleted beatmaps', () => {}, { unavailable: true }),
+          button('Restore all hidden difficulties', () => {
+            const n = HiddenBeatmaps.restoreAll();
+            game.toast(`Restored ${n} hidden difficult${n === 1 ? 'y' : 'ies'}`, 'success');
+          }),
+          button('Restore all recently deleted beatmaps', () => {
+            const n = game.library.restoreDeleted();
+            game.toast(`Restored ${n} beatmap set${n === 1 ? '' : 's'}`, 'success');
+          }),
         ],
       },
       { header: 'Skins', items: [button('Delete ALL skins', () => void deleteAllSkins(), { dangerous: true })] },
-      { header: 'Collections', items: [button('Delete ALL collections', () => {}, { dangerous: true, unavailable: true })] },
+      {
+        header: 'Collections',
+        items: [
+          button(
+            'Delete ALL collections',
+            async () => {
+              if (!(await confirmDialog(game, 'Are you sure you want to delete all collections?', 'Yes. Go for it.'))) return;
+              const n = Collections.removeAll();
+              game.toast(`Deleted ${n} collection${n === 1 ? '' : 's'}`, 'success');
+            },
+            { dangerous: true },
+          ),
+        ],
+      },
       { header: 'Scores', items: [button('Delete ALL scores', () => void deleteAllScores(), { dangerous: true })] },
       { header: 'Mod presets', items: [button('Delete ALL mod presets', () => {}, { dangerous: true, unavailable: true }), button('Restore all recently deleted mod presets', () => {}, { unavailable: true })] },
     ],
