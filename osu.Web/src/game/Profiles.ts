@@ -15,6 +15,8 @@ export interface Profile {
   createdAt: number;
   /** Avatar colour (hue). */
   hue: number;
+  /** SHA-256 of the optional profile password (hex). */
+  passwordHash?: string;
 }
 
 /** Counters that only exist as history (not derivable from the stored best scores). */
@@ -29,43 +31,91 @@ export interface PlayCounters {
   replaysWatched: number;
 }
 
+/** UserStatus as chosen in the login panel dropdown (OsuSetting.UserOnlineStatus). */
+export type UserStatus = 'online' | 'dnd' | 'offline';
+
 const PROFILES_KEY = 'profiles';
 const CURRENT_KEY = 'profile.current';
+const BOOTSTRAPPED_KEY = 'profiles.bootstrapped';
 const countersKey = (pid: string, rulesetId: number) => `profileStats.${pid}.${rulesetId}`;
 const EMPTY: PlayCounters = { playCount: 0, totalScore: 0, totalHits: 0, playTime: 0, maxCombo: 0, replaysWatched: 0 };
+export const GUEST_ID = 'guest';
 
 const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+
+export async function hashPassword(password: string): Promise<string> {
+  const bytes = new TextEncoder().encode(`jarvsu:${password}`);
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    // No SubtleCrypto (insecure context): a simple FNV-1a fallback; this is a local lock, not security.
+    let hsh = 0x811c9dc5;
+    for (const b of bytes) hsh = Math.imul(hsh ^ b, 0x01000193) >>> 0;
+    return `fnv${hsh.toString(16)}`;
+  }
+}
 
 export const Profiles = {
   all(): Profile[] {
     let list = settings.get<Profile[]>(PROFILES_KEY, []);
-    if (list.length === 0) {
-      // The first profile takes over the existing player name (and therefore its existing scores).
-      list = [{ id: newId(), username: settings.get<string>('ui.username', 'Guest') || 'Guest', createdAt: Date.now(), hue: 280 }];
-      settings.set(PROFILES_KEY, list);
-      settings.set(CURRENT_KEY, list[0].id);
+    if (list.length === 0 && !settings.get<boolean>(BOOTSTRAPPED_KEY, false)) {
+      settings.set(BOOTSTRAPPED_KEY, true);
+      // An existing player name becomes the first profile (keeping its scores); otherwise start signed out as Guest.
+      const name = (settings.get<string>('ui.username', 'Guest') || 'Guest').trim();
+      if (name && name !== 'Guest') {
+        list = [{ id: newId(), username: name, createdAt: Date.now(), hue: 280 }];
+        settings.set(PROFILES_KEY, list);
+        settings.set(CURRENT_KEY, list[0].id);
+      }
     }
     return list;
   },
-  current(): Profile {
-    const list = this.all();
-    return list.find(p => p.id === settings.get<string>(CURRENT_KEY, '')) ?? list[0];
+  find(username: string): Profile | undefined {
+    const u = username.trim().toLowerCase();
+    return this.all().find(p => p.username.toLowerCase() === u);
   },
-  create(username: string): Profile {
-    const p: Profile = { id: newId(), username, createdAt: Date.now(), hue: Math.floor(Math.random() * 360) };
+  /** The signed-in profile, or the Guest stand-in while signed out. */
+  current(): Profile {
+    const id = settings.get<string>(CURRENT_KEY, '');
+    return this.all().find(p => p.id === id) ?? { id: GUEST_ID, username: settings.get<string>('ui.username', 'Guest') || 'Guest', createdAt: 0, hue: 280 };
+  },
+  signedIn(): boolean {
+    return this.current().id !== GUEST_ID;
+  },
+  async create(username: string, password = ''): Promise<Profile> {
+    const p: Profile = { id: newId(), username: username.trim(), createdAt: Date.now(), hue: Math.floor(Math.random() * 360) };
+    if (password) p.passwordHash = await hashPassword(password);
     settings.set(PROFILES_KEY, [...this.all(), p]);
     this.switchTo(p.id);
     return p;
+  },
+  /** LoginForm.performLogin: returns an error message, or null when signed in. */
+  async signIn(username: string, password: string): Promise<string | null> {
+    const p = this.find(username);
+    if (!p) return 'No profile with that username exists. Use "Register" to make one.';
+    if (p.passwordHash && (await hashPassword(password)) !== p.passwordHash) return 'Incorrect password.';
+    this.switchTo(p.id);
+    return null;
+  },
+  signOut(): void {
+    const cur = this.current();
+    if (cur.id === GUEST_ID) return;
+    settings.set('online.lastUsername', settings.get<boolean>('online.saveUsername', true) ? cur.username : '');
+    settings.set(CURRENT_KEY, '');
+    settings.set('ui.username', 'Guest');
   },
   rename(id: string, username: string): void {
     settings.set(PROFILES_KEY, this.all().map(p => (p.id === id ? { ...p, username } : p)));
     if (this.current().id === id) settings.set('ui.username', username);
   },
+  async setPassword(id: string, password: string): Promise<void> {
+    const hash = password ? await hashPassword(password) : undefined;
+    settings.set(PROFILES_KEY, this.all().map(p => (p.id === id ? { ...p, passwordHash: hash } : p)));
+  },
   remove(id: string): void {
-    const list = this.all().filter(p => p.id !== id);
-    if (list.length === 0) return;
-    settings.set(PROFILES_KEY, list);
-    if (settings.get<string>(CURRENT_KEY, '') === id) this.switchTo(list[0].id);
+    if (this.current().id === id) this.signOut();
+    settings.set(PROFILES_KEY, this.all().filter(p => p.id !== id));
   },
   switchTo(id: string): void {
     const p = this.all().find(x => x.id === id);
@@ -73,6 +123,13 @@ export const Profiles = {
     settings.set(CURRENT_KEY, id);
     // Scores and replays record the player name.
     settings.set('ui.username', p.username);
+    settings.set('online.lastUsername', settings.get<boolean>('online.saveUsername', true) ? p.username : '');
+  },
+  status(): UserStatus {
+    return settings.get<UserStatus>('online.userStatus', 'online');
+  },
+  setStatus(s: UserStatus): void {
+    settings.set('online.userStatus', s);
   },
 
   counters(pid: string, rulesetId: number): PlayCounters {
@@ -149,7 +206,7 @@ export interface ProfileStatistics {
   firsts: ScoreRecord[];
 }
 
-export const belongsTo = (s: ScoreRecord, p: Profile): boolean => (s.profileId ? s.profileId === p.id : s.player === p.username);
+export const belongsTo = (s: ScoreRecord, p: Profile): boolean => (s.profileId ? s.profileId === p.id : p.id === GUEST_ID ? s.player === 'Guest' : s.player === p.username);
 
 /** UserStatistics for a profile and ruleset, from the stored scores (best per beatmap) and play counters. */
 export async function profileStatistics(profile: Profile, rulesetId: number): Promise<ProfileStatistics> {
@@ -227,10 +284,13 @@ export async function profileStatistics(profile: Profile, rulesetId: number): Pr
   };
 }
 
-// The settings "Player name" box renames the current profile.
+// The settings "Player name" box renames the signed-in profile.
 settings.subscribe(k => {
   if (k !== 'ui.username') return;
   const name = (settings.get<string>('ui.username', '') ?? '').trim();
   const cur = Profiles.current();
-  if (name && name !== cur.username) Profiles.rename(cur.id, name);
+  if (cur.id !== GUEST_ID && name && name !== cur.username) Profiles.rename(cur.id, name);
 });
+
+// OsuSetting.SavePassword ("Stay signed in"): without it, every start of the game is signed out.
+if (!settings.get<boolean>('online.staySignedIn', true)) Profiles.signOut();

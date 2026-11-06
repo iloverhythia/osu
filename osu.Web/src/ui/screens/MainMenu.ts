@@ -20,7 +20,7 @@ import { Anim, Easing, now as clockNow } from '../menu/Transforms';
 import '../menu/menu.css';
 import { openSettings } from '../overlays/Settings';
 import { openChartGenerator } from '../overlays/ChartGenerator';
-import { userButton } from '../overlays/Profile';
+import { createToolbar } from '../Toolbar';
 import { Screen } from '../Screen';
 import { SongSelectScreen } from './SongSelect';
 import { applyEasing } from '../../game/storyboard/Easing';
@@ -69,7 +69,7 @@ export class MainMenuScreen extends Screen {
     return true;
   }
 
-  private readonly userButton: HTMLElement;
+  private readonly toolbar: HTMLElement;
 
   constructor(game: Game) {
     super(game, 'menu main-menu');
@@ -96,6 +96,10 @@ export class MainMenuScreen extends Screen {
         },
       });
     this.buttons.onStateChanged = s => {
+      const toolbarShown = s !== ButtonSystemState.Initial && s !== ButtonSystemState.Exit;
+      this.toolbar?.classList.toggle('shown', toolbarShown);
+      // ScreenOffsetContainer: screen content moves down below the visible toolbar.
+      this.el.classList.toggle('toolbar-shown', toolbarShown);
       // MainMenu: Buttons.StateChanged → background colour (Gray(1) at the logo, Gray(0.8) otherwise).
       if (this.phase !== 'menu') return;
       this.game.setBackgroundDim(s === ButtonSystemState.Initial || s === ButtonSystemState.Exit ? 0 : 0.2);
@@ -127,10 +131,9 @@ export class MainMenuScreen extends Screen {
     this.content = document.createElement('div');
     this.content.className = 'menu-scale';
     this.content.append(this.buttons.el, this.additive, this.logoLayer, this.songTicker.el, bottom, this.footer, this.logo.el);
-    this.userButton = userButton(game);
-    this.userButton.classList.add('menu-user-button');
-    this.userButton.style.opacity = '0';
-    this.el.append(this.content, this.userButton, this.flash, this.gate);
+    // ButtonSystem.updateLogoState: the toolbar hides at the logo (Initial / Exit) and shows otherwise.
+    this.toolbar = createToolbar(game, { onHome: () => (this.buttons.state = ButtonSystemState.Initial) });
+    this.el.append(this.content, this.toolbar, this.flash, this.gate);
     this.logo.hide();
     this.buttons.alpha.set(0);
     this.footer.style.opacity = '0';
@@ -258,7 +261,6 @@ export class MainMenuScreen extends Screen {
     this.buttons.setOsuLogo(this.logo);
     if (settings.get('ui.menuTips', true)) this.tips.showNextTip(t);
     this.footer.style.opacity = '';
-    this.userButton.style.opacity = '';
     this.lastInput = t;
     if (!this.game.previewTrack?.isRunning) void this.game.startPreview();
   }

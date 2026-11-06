@@ -1,0 +1,331 @@
+/* LoginOverlay: 360 wide, OverlayColourProvider(Purple).Background4, under the toolbar user button. */
+
+.lo-overlay {
+  position: fixed;
+  z-index: 900;
+  width: 360px;
+  max-width: 100vw;
+  max-height: calc(100vh - 50px);
+  overflow-y: auto;
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 400ms cubic-bezier(0.23, 1, 0.32, 1), transform 400ms cubic-bezier(0.23, 1, 0.32, 1);
+  pointer-events: none;
+}
+
+.lo-overlay.shown {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.lo-root.st-root {
+  position: static;
+  inset: auto;
+  opacity: 1;
+  z-index: auto;
+  background: var(--c-background4);
+}
+
+.lo-panel {
+  padding: 14px 0;
+}
+
+.lo-padded {
+  padding: 0 20px;
+}
+
+.lo-form,
+.lo-signed-in,
+.lo-form > .lo-padded {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.lo-form .st-button-item {
+  padding: 0 20px;
+}
+
+.lo-heading {
+  font-weight: 700;
+  font-size: 16px;
+  color: #fff;
+}
+
+.lo-title {
+  align-self: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.lo-textbox {
+  width: 100%;
+  height: 40px;
+  box-sizing: border-box;
+  border: 3px solid transparent;
+  border-radius: 5px;
+  padding: 0 10px;
+  background: var(--c-background5, #000);
+  color: #fff;
+  font: 400 18px var(--font);
+  outline: none;
+  transition: border-color 300ms;
+}
+
+.lo-textbox::placeholder {
+  color: var(--c-foreground1);
+}
+
+.lo-textbox:focus {
+  border-color: var(--c-highlight1);
+}
+
+.lo-error {
+  display: none;
+  color: #ed1121;
+  font-size: 14px;
+  margin-top: -6px;
+}
+
+.lo-error.shown {
+  display: block;
+}
+
+.lo-note {
+  font-size: 12px;
+  color: var(--c-foreground1);
+}
+
+.lo-root .sf-checkbox {
+  margin: 0 20px;
+}
+
+.lo-register {
+  background: var(--c-background2) !important;
+}
+
+.lo-register:hover {
+  background: var(--c-background1) !important;
+}
+
+@keyframes lo-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-8px); }
+  40% { transform: translateX(8px); }
+  60% { transform: translateX(-6px); }
+  80% { transform: translateX(4px); }
+}
+
+.lo-shake {
+  animation: lo-shake 0.3s;
+}
+
+/* UserRankPanel */
+.lo-rank-panel {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--c-background5);
+  color: #fff;
+  font-family: var(--font);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 0 var(--c-light1);
+  transition: box-shadow 150ms;
+}
+
+.lo-rank-panel:hover {
+  box-shadow: inset 0 0 0 2px var(--c-light1);
+}
+
+.lo-rank-main {
+  position: relative;
+  height: 80px;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.lo-cover {
+  position: absolute;
+  inset: 0;
+  opacity: 0.3;
+}
+
+.lo-rank-grid {
+  position: relative;
+  display: flex;
+  height: 100%;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+.lo-rank-grid .pf-avatar {
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.lo-rank-names {
+  display: flex;
+  flex-direction: column;
+  padding-left: 10px;
+  min-width: 0;
+}
+
+.lo-flag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--c-content2);
+}
+
+.lo-username-text {
+  margin-top: auto;
+  margin-bottom: auto;
+  font-size: 16px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lo-rank-bottom {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 10px;
+}
+
+.lo-value-title {
+  font-size: 12px;
+  color: var(--c-content2);
+}
+
+.lo-value {
+  font-size: 22px;
+  font-weight: 300;
+}
+
+.lo-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.lo-spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: lo-spin 0.8s linear infinite;
+}
+
+@keyframes lo-spin {
+  to { transform: rotate(360deg); }
+}
+
+.lo-password-row {
+  display: flex;
+  gap: 8px;
+}
+
+.lo-password-row .st-button.lo-small {
+  width: 80px;
+  flex: none;
+}
+
+/* UserDropdown */
+.lo-dropdown {
+  position: relative;
+}
+
+.lo-dd-header {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 40px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--c-background5);
+  color: #fff;
+  font: 600 15px var(--font);
+  cursor: pointer;
+}
+
+.lo-dd-header:hover {
+  background: var(--c-background3);
+}
+
+.lo-status-icon {
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 3px solid;
+  border-radius: 50%;
+  transition: border-color 500ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.lo-dd-label {
+  margin-left: 6px;
+  flex: 1;
+  text-align: left;
+}
+
+.lo-dd-chevron {
+  font-size: 16px;
+  line-height: 0;
+  transform: translateY(-4px);
+  transition: transform 200ms;
+}
+
+.lo-dropdown.open .lo-dd-chevron {
+  transform: translateY(4px) rotate(180deg);
+}
+
+.lo-dd-menu {
+  display: none;
+  margin-top: 4px;
+  padding: 5px 0;
+  border-radius: 5px;
+  background: var(--c-background5);
+}
+
+.lo-dropdown.open .lo-dd-menu {
+  display: block;
+}
+
+.lo-dd-item {
+  display: block;
+  width: 100%;
+  padding: 5px 5px 5px 10px;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font: 400 15px var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+
+.lo-dd-item:hover {
+  background: var(--c-background3);
+}
+
+.lo-dd-item.selected {
+  font-weight: 700;
+  color: var(--c-light1);
+}

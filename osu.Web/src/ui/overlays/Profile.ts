@@ -10,26 +10,24 @@ import { RULESET_DISPLAY_NAMES } from '../../brand';
 import { settings } from '../../framework/Settings';
 import { LegacyBeatmapDecoder } from '../../game/beatmaps/LegacyBeatmapDecoder';
 import { ModSet } from '../../game/mods/Mods';
-import { belongsTo, Profile, profileStatistics, Profiles, ProfileScore, ProfileStatistics } from '../../game/Profiles';
+import { GUEST_ID, Profile, profileStatistics, Profiles, ProfileScore, ProfileStatistics } from '../../game/Profiles';
 import { availableRulesets, getRuleset } from '../../game/rulesets';
 import { HitResult } from '../../game/scoring/HitResult';
 import { calculatePerformance } from '../../game/scoring/Performance';
 import { RANK_COLOURS, RANK_DISPLAY, type ScoreRank } from '../../game/scoring/ScoreRank';
 import { Database, type ScoreRecord } from '../../game/storage/Database';
 import { findFile } from '../../game/storage/Importer';
-import { confirmDialog } from '../confirm';
 import { h } from '../dom';
 import type { Game } from '../Game';
 import { rulesetIcon } from '../select/Icons';
+import { statusColour, toggleLoginOverlay } from './Login';
 
 // ------------------------------------------------------------------ avatar / level helpers
 
 export function avatar(p: Profile, size: number): HTMLElement {
-  return h(
-    'div',
-    { class: 'pf-avatar', style: { width: `${size}px`, height: `${size}px`, fontSize: `${size * 0.45}px`, background: `linear-gradient(135deg, hsl(${p.hue},70%,55%), hsl(${(p.hue + 40) % 360},70%,35%))` } },
-    (p.username[0] ?? '?').toUpperCase(),
-  );
+  // The guest gets the default (grey) avatar.
+  const bg = p.id === GUEST_ID ? 'linear-gradient(135deg, #6b6b78, #3a3a44)' : `linear-gradient(135deg, hsl(${p.hue},70%,55%), hsl(${(p.hue + 40) % 360},70%,35%))`;
+  return h('div', { class: 'pf-avatar', style: { width: `${size}px`, height: `${size}px`, fontSize: `${size * 0.45}px`, background: bg } }, p.id === GUEST_ID ? '?' : (p.username[0] ?? '?').toUpperCase());
 }
 
 /** LevelBadge: the level number in a hexagon. */
@@ -269,14 +267,17 @@ function render(game: Game, p: Profile, rulesetId: number, s: ProfileStatistics,
   );
 }
 
-// ------------------------------------------------------------------ toolbar user button + profile switcher
+// ------------------------------------------------------------------ toolbar user button
 
-/** ToolbarUserButton: avatar + username; opens the profile switcher. */
+/** ToolbarUserButton: username + avatar; toggles the login overlay. */
 export function userButton(game: Game): HTMLElement {
   const el = h('button', { class: 'pf-user-button', title: 'Profile' });
   const render = () => {
     const p = Profiles.current();
-    el.replaceChildren(avatar(p, 26), h('span', { class: 'pf-user-name' }, p.username));
+    const av = avatar(p, 32);
+    av.classList.add('pf-user-avatar');
+    if (p.id !== GUEST_ID) av.appendChild(h('span', { class: 'pf-user-status', style: { background: statusColour(Profiles.status()) } }));
+    el.replaceChildren(h('span', { class: 'pf-user-name' }, p.username), av);
   };
   render();
   let seen = false;
@@ -284,120 +285,11 @@ export function userButton(game: Game): HTMLElement {
     // Drop the listener once the button has left the page (its screen was disposed).
     if (el.isConnected) seen = true;
     else if (seen) return unsubscribe();
-    if (k === 'profiles' || k === 'profile.current') render();
+    if (k === 'profiles' || k === 'profile.current' || k === 'ui.username' || k === 'online.userStatus') render();
   });
   el.addEventListener('click', e => {
     e.stopPropagation();
-    openProfileSwitcher(game, el);
+    toggleLoginOverlay(game, el);
   });
   return el;
 }
-
-export function openProfileSwitcher(game: Game, anchor: HTMLElement): void {
-  document.querySelector('.pf-switcher')?.remove();
-  const current = Profiles.current();
-  const level = h('span', { class: 'pf-sw-level' });
-  void backfillPerformance(game)
-    .then(() => profileStatistics(current, game.ruleset.id))
-    .then(s => (level.textContent = `Lv ${Math.floor(s.level)} · ${n0(s.pp)}pp`));
-  const close = () => {
-    pop.remove();
-    document.removeEventListener('pointerdown', outside, true);
-  };
-  const outside = (e: PointerEvent) => {
-    if (!pop.contains(e.target as Node) && !anchor.contains(e.target as Node)) close();
-  };
-  const others = Profiles.all().filter(p => p.id !== current.id);
-  const nameInput = h('input', { class: 'pf-sw-input', type: 'text', placeholder: 'New profile name', maxLength: 32 }) as HTMLInputElement;
-  const create = () => {
-    const name = nameInput.value.trim();
-    if (!name) return;
-    if (Profiles.all().some(p => p.username.toLowerCase() === name.toLowerCase())) {
-      game.toast('A profile with that name already exists', 'error');
-      return;
-    }
-    Profiles.create(name);
-    game.toast(`Switched to ${name}`, 'success');
-    close();
-  };
-  nameInput.addEventListener('keydown', e => {
-    e.stopPropagation();
-    if (e.key === 'Enter') create();
-    if (e.key === 'Escape') close();
-  });
-  const pop = h(
-    'div',
-    { class: 'pf-switcher', onpointerdown: (e: PointerEvent) => e.stopPropagation() },
-    h(
-      'div',
-      { class: 'pf-sw-current' },
-      avatar(current, 48),
-      h('div', { class: 'pf-sw-names' }, h('div', { class: 'pf-sw-name' }, current.username), level),
-    ),
-    h(
-      'div',
-      { class: 'pf-sw-actions' },
-      h('button', { class: 'pf-sw-button primary', onclick: () => (close(), openProfile(game)) }, 'View profile'),
-      h(
-        'button',
-        {
-          class: 'pf-sw-button',
-          onclick: () => {
-            const input = h('input', { class: 'pf-sw-input', type: 'text', value: current.username, maxLength: 32 }) as HTMLInputElement;
-            input.addEventListener('keydown', e => {
-              e.stopPropagation();
-              if (e.key === 'Enter') {
-                const v = input.value.trim();
-                if (v) Profiles.rename(current.id, v);
-                close();
-              }
-              if (e.key === 'Escape') close();
-            });
-            pop.querySelector('.pf-sw-current .pf-sw-name')?.replaceWith(input);
-            input.focus();
-            input.select();
-          },
-        },
-        'Rename',
-      ),
-      others.length > 0
-        ? h(
-            'button',
-            {
-              class: 'pf-sw-button danger',
-              onclick: async () => {
-                close();
-                if (await confirmDialog(game, `Delete the profile "${current.username}"? Its scores stay on their leaderboards.`, 'Delete profile')) Profiles.remove(current.id);
-              },
-            },
-            'Delete',
-          )
-        : null,
-    ),
-    others.length ? h('div', { class: 'pf-sw-heading' }, 'Switch profile') : null,
-    ...others.map(p =>
-      h(
-        'button',
-        {
-          class: 'pf-sw-profile',
-          onclick: () => {
-            Profiles.switchTo(p.id);
-            game.toast(`Switched to ${p.username}`, 'success');
-            close();
-          },
-        },
-        avatar(p, 30),
-        h('span', null, p.username),
-      ),
-    ),
-    h('div', { class: 'pf-sw-heading' }, 'New profile'),
-    h('div', { class: 'pf-sw-new' }, nameInput, h('button', { class: 'pf-sw-button primary', onclick: create }, 'Create')),
-  );
-  document.body.appendChild(pop);
-  const r = anchor.getBoundingClientRect();
-  pop.style.top = `${r.bottom + 6}px`;
-  pop.style.left = `${Math.max(8, Math.min(innerWidth - pop.offsetWidth - 8, r.right - pop.offsetWidth))}px`;
-  setTimeout(() => document.addEventListener('pointerdown', outside, true), 0);
-}
-
-export { belongsTo };
