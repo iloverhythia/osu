@@ -61,6 +61,7 @@ export const DEFAULT_SETTINGS = {
   'graphics.showFps': false,
   'ui.ruleset': 0,
   'ui.username': 'Guest',
+  'ui.showFirstRunSetup': true,
   'ui.preferUnicode': false,
   'ui.sortMode': 'title',
   // Settings overlay additions (OsuConfigManager / ruleset config defaults).

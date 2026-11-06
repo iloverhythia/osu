@@ -1,0 +1,257 @@
+/* FirstRunSetupOverlay (WizardOverlay, OverlayColourProvider(Purple)). */
+.overlay.fr-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.fr-panel {
+  width: min(800px, calc(100vw - 32px));
+  height: min(640px, calc(100vh - 32px));
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  overflow: hidden;
+  background: hsl(255, 10%, 15%);
+  color: #fff;
+  font-family: var(--font);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  animation: fr-in 500ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@keyframes fr-in {
+  from {
+    transform: translateY(30px);
+    opacity: 0;
+  }
+}
+
+.fr-header {
+  position: relative;
+  padding: 20px 30px;
+  background: hsl(255, 10%, 20%);
+}
+
+.fr-header-title {
+  font-size: 24px;
+  font-weight: 300;
+}
+
+.fr-header-desc {
+  font-size: 14px;
+  color: hsl(255, 40%, 80%);
+}
+
+.fr-close {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  border: 0;
+  background: transparent;
+  color: hsl(255, 40%, 80%);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.fr-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 40px;
+}
+
+.fr-step-title {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+
+.fr-text {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.fr-text p {
+  margin: 0 0 12px;
+}
+
+.fr-note {
+  color: hsl(255, 20%, 70%);
+  font-size: 14px;
+}
+
+.fr-two-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.fr-button {
+  height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: hsl(255, 10%, 30%);
+  color: #fff;
+  font: 700 15px var(--font);
+  cursor: pointer;
+}
+
+.fr-button:hover {
+  background: hsl(255, 10%, 38%);
+}
+
+.fr-button.primary {
+  background: hsl(255, 60%, 50%);
+}
+
+.fr-classic-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fr-classic-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: hsl(255, 10%, 20%);
+  font-size: 14px;
+}
+
+.fr-classic-value {
+  font-weight: 700;
+  color: hsl(255, 100%, 80%);
+}
+
+.fr-st.st-root {
+  position: relative;
+  inset: auto;
+  opacity: 1;
+  z-index: auto;
+  margin: 10px 0;
+}
+
+.fr-scale-preview {
+  position: relative;
+  height: 200px;
+  margin-top: 10px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #2a1d3a, #120e18);
+}
+
+.fr-scale-inner {
+  position: absolute;
+  inset: 0;
+  transform-origin: top left;
+  transition: transform 200ms;
+}
+
+.fr-mock-wedge {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  width: 200px;
+  height: 70px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.15);
+  transform: skewX(-10deg);
+}
+
+.fr-mock-panels {
+  position: absolute;
+  right: 0;
+  top: 20px;
+  width: 45%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fr-mock-panel {
+  height: 24px;
+  border-radius: 6px 0 0 6px;
+  background: rgba(155, 48, 255, 0.5);
+}
+
+.fr-mock-panel:nth-child(2) {
+  background: #9b30ff;
+  margin-left: -20px;
+}
+
+.fr-mock-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 30px;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.fr-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 24px;
+  background: hsl(255, 10%, 20%);
+}
+
+.fr-nav {
+  height: 44px;
+  padding: 0 24px;
+  border: 0;
+  border-radius: 8px;
+  font: 700 15px var(--font);
+  color: #fff;
+  cursor: pointer;
+}
+
+.fr-nav.back {
+  background: hsl(255, 10%, 30%);
+}
+
+.fr-nav.next {
+  margin-left: auto;
+  background: hsl(255, 60%, 50%);
+}
+
+.fr-nav.next:hover {
+  background: hsl(255, 60%, 58%);
+}
+
+.fr-progress {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  justify-content: center;
+}
+
+.fr-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: hsl(255, 10%, 35%);
+}
+
+.fr-dot.done {
+  background: hsl(255, 40%, 60%);
+}
+
+.fr-dot.active {
+  background: #fff;
+}
+
+@media (max-width: 600px) {
+  .fr-body {
+    padding: 16px;
+  }
+  .fr-two-buttons {
+    grid-template-columns: 1fr;
+  }
+}

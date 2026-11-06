@@ -214,7 +214,7 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
       {
         header: 'Quick Actions',
         items: [
-          button('Run setup wizard', () => {}, { unavailable: true }),
+          button('Run setup wizard', () => void import('../FirstRunSetup').then(m => m.openFirstRunSetup(game))),
           button('Learn more about osu!lazer', () => openLink(game, 'https://github.com/ppy/osu'), { tooltip: `${APP_NAME} is a browser port of the open-source osu!lazer.` }),
           button('Report an issue', () => openLink(game, 'https://github.com/iloverhythia/osu/issues')),
           button('Export logs', () => {}, { unavailable: true }),

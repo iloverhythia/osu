@@ -95,7 +95,7 @@ export function trackSettings(): void {
       case ACTIVE_SKIN_SETTING:
         void listSkins().then(skins => {
           const name = typeof v === 'string' ? (skins.find(s => s.id === v)?.name ?? 'unknown') : `argon (${APP_NAME})`;
-          displayToast({ description: 'Skin', value: name, extra: 'Random skin: Ctrl+Shift+S' });
+          displayToast({ description: 'Skin', value: name, extra: 'Random skin: Ctrl+Shift+R' });
         });
         break;
       case 'graphics.uiScale':

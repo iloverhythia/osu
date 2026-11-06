@@ -317,6 +317,8 @@ export class MainMenuScreen extends Screen {
     this.intro = null;
     this.phase = 'menu';
     this.game.setBackgroundDim(0);
+    // FirstRunSetupOverlay: shown after the intro until it has been completed once.
+    if (settings.get<boolean>('ui.showFirstRunSetup', true)) setTimeout(() => void import('../overlays/FirstRunSetup').then(m => m.openFirstRunSetup(this.game)), 1200);
 
     // MainMenu.OnEntering + LogoArriving(resuming: false).
     this.buttons.alpha.set(0).to(1, t, 500);

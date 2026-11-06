@@ -502,6 +502,14 @@ export class Game {
     return this.overlays.length > 0;
   }
 
+  /** SkinManager.SelectRandomSkin: any skin but the current one. */
+  private async selectRandomSkin(): Promise<void> {
+    const { listSkins, ACTIVE_SKIN_SETTING } = await import('../game/skinning');
+    const current = settings.get<string | null>(ACTIVE_SKIN_SETTING, null) ?? '';
+    const pool = ['', ...(await listSkins()).map(s => s.id)].filter(id => id !== current);
+    if (pool.length) settings.set(ACTIVE_SKIN_SETTING, pool[Math.floor(Math.random() * pool.length)] || null);
+  }
+
   /** NotificationOverlay.Post (SimpleNotification / SimpleErrorNotification). */
   toast(message: string, kind: 'info' | 'error' | 'success' = 'info', duration = 3500, onClick?: () => void): void {
     this.notifications.post(message, kind, { important: duration > 5000, onClick });
@@ -545,6 +553,13 @@ export class Game {
       e.preventDefault();
       this.nowPlaying.hide();
       this.notifications.toggle();
+      return;
+    }
+    // GlobalAction.ToggleSkinEditor (Ctrl+Shift+S) / RandomSkin (Ctrl+Shift+R), outside gameplay.
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.code === 'KeyS' || e.code === 'KeyR') && !e.repeat && this.currentScreen?.allowTrackControl !== false && !this.currentScreen?.el.classList.contains('editor-screen')) {
+      e.preventDefault();
+      if (e.code === 'KeyS') void import('./editor/SkinEditor').then(m => m.openSkinEditor(this));
+      else void this.selectRandomSkin();
       return;
     }
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'KeyF' && !e.repeat) {

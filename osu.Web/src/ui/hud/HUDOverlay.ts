@@ -9,6 +9,7 @@ import { Anim, Easing } from './anim';
 import { ArgonAccuracyCounter, ArgonComboCounter, ArgonScoreCounter, drawArgonText, measureArgonText } from './ArgonCounter';
 import { ArgonHealthDisplay, MAIN_PATH_RADIUS } from './ArgonHealthDisplay';
 import { ArgonKeyCounterDisplay, ArgonSongProgress, BarHitErrorMeter, ColourHitErrorMeter, FailingLayer, ModDisplay, drawWedge } from './HudComponents';
+import { anchorFraction, loadLayout, type ComponentLayout, type HudComponentId } from './SkinLayout';
 
 /** HUDVisibilityMode */
 export type HUDVisibilityMode = 'never' | 'hideDuringGameplay' | 'always';
@@ -68,6 +69,8 @@ export class HUDOverlay {
   private readonly drainingHealth: boolean;
   private readonly showHealthBar: boolean;
   private hoverPos: { x: number; y: number } | null = null;
+  /** SkinLayoutInfo for the HUD (editable in the skin editor). */
+  layout: Record<HudComponentId, ComponentLayout> = loadLayout();
   private lastModRect: { x: number; y: number; w: number; h: number } | null = null;
 
   constructor(o: HUDOptions, now: number, mode: HUDVisibilityMode) {
@@ -160,69 +163,147 @@ export class HUDOverlay {
     this.failingLayer.draw(g, w, h, now);
   }
 
+  /** Components present for this ruleset, in draw order. */
+  componentIds(): HudComponentId[] {
+    const ids: HudComponentId[] = ['wedge1', 'wedge2', 'health', 'score', 'accuracy', 'progress', 'keyCounter'];
+    if (this.combo) ids.push('combo');
+    if (this.barMeter || this.colourMeters) ids.push('hitErrorLeft', 'hitErrorRight');
+    return ids;
+  }
+
+  /** The component's unscaled size (its DrawSize). */
+  componentSize(id: HudComponentId, g: CanvasRenderingContext2D, w: number, now: number): { w: number; h: number } {
+    switch (id) {
+      case 'wedge1':
+      case 'wedge2':
+        return { w: 380, h: 72 };
+      case 'health':
+        return { w: this.health.width, h: this.health.barHeight + MAIN_PATH_RADIUS * 2 };
+      case 'score': {
+        const m = measureArgonText(g, this.score.options(now));
+        return { w: m.width, h: m.height };
+      }
+      case 'accuracy': {
+        const m = this.accuracy.measure(g, now);
+        return { w: m.width, h: m.height };
+      }
+      case 'combo': {
+        if (!this.combo) return { w: 0, h: 0 };
+        const m = measureArgonText(g, this.combo.options(now));
+        return { w: m.width, h: m.height };
+      }
+      case 'progress':
+        // RelativeSizeAxes.X: the width follows the screen (scaled by its X scale).
+        return { w, h: this.progress.height };
+      case 'keyCounter':
+        return { w: Math.max(this.keyCounter.width, 1), h: ArgonKeyCounterDisplay.KEY_H };
+      case 'hitErrorLeft':
+      case 'hitErrorRight':
+        return this.colourMeters ? { w: 8, h: this.colourMeters[0].height } : { w: BarHitErrorMeter.WIDTH, h: BarHitErrorMeter.HEIGHT };
+    }
+  }
+
+  /** Screen-space transform for a component: the anchor point plus position, then rotation and scale about the origin. */
+  componentTransform(id: HudComponentId, g: CanvasRenderingContext2D, w: number, h: number, now: number): { x: number; y: number; size: { w: number; h: number }; l: ComponentLayout } {
+    const l = this.layout[id];
+    const a = anchorFraction(l.anchor);
+    return { x: a.x * w + l.x, y: a.y * h + l.y, size: this.componentSize(id, g, w, now), l };
+  }
+
+  /** The component's axis-aligned screen bounds (for the skin editor). */
+  componentBounds(id: HudComponentId, g: CanvasRenderingContext2D, w: number, h: number, now: number): { x: number; y: number; w: number; h: number } {
+    const t = this.componentTransform(id, g, w, h, now);
+    const o = anchorFraction(t.l.origin);
+    const cw = t.size.w * t.l.scaleX;
+    const ch = t.size.h * t.l.scaleY;
+    const corners = [
+      [-o.x * cw, -o.y * ch],
+      [(1 - o.x) * cw, -o.y * ch],
+      [-o.x * cw, (1 - o.y) * ch],
+      [(1 - o.x) * cw, (1 - o.y) * ch],
+    ].map(([px, py]) => {
+      const r = (t.l.rotation * Math.PI) / 180;
+      return [t.x + px * Math.cos(r) - py * Math.sin(r), t.y + px * Math.sin(r) + py * Math.cos(r)];
+    });
+    const xs = corners.map(c => c[0]);
+    const ys = corners.map(c => c[1]);
+    return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+  }
+
+  /** Draws one component with its top-left at (0, 0) of the current transform. */
+  private drawComponent(id: HudComponentId, g: CanvasRenderingContext2D, size: { w: number; h: number }, now: number, dpr: number): void {
+    switch (id) {
+      case 'wedge1':
+      case 'wedge2':
+        drawWedge(g, 0, 0, 380, 72);
+        return;
+      case 'health':
+        g.save();
+        g.globalAlpha *= this.healthAlpha.valueAt(now);
+        this.health.draw(g, 0, 0, now, dpr);
+        // The health line (45x3, CentreLeft) left of the bar.
+        g.fillStyle = '#fff';
+        g.beginPath();
+        if (typeof g.roundRect === 'function') g.roundRect(-50, MAIN_PATH_RADIUS - 1.5, 45, 3, 1.5);
+        else g.rect(-50, MAIN_PATH_RADIUS - 1.5, 45, 3);
+        g.fill();
+        g.restore();
+        return;
+      case 'score': {
+        const o = this.score.options(now);
+        drawArgonText(g, 0, 0, o, measureArgonText(g, o));
+        return;
+      }
+      case 'accuracy':
+        this.accuracy.draw(g, 0, 0, now);
+        return;
+      case 'combo': {
+        if (!this.combo) return;
+        const o = this.combo.options(now);
+        drawArgonText(g, 0, 0, o, measureArgonText(g, o));
+        return;
+      }
+      case 'progress':
+        this.progress.draw(g, size.w / 2, size.h, size.w, now);
+        return;
+      case 'keyCounter':
+        this.keyCounter.draw(g, size.w, size.h, now);
+        return;
+      case 'hitErrorLeft':
+      case 'hitErrorRight': {
+        if (!this.showHitErrorMeter) return;
+        const mirror = id === 'hitErrorRight';
+        if (this.barMeter) this.barMeter.draw(g, 0, 0, now, mirror);
+        else if (this.colourMeters) this.colourMeters[mirror ? 1 : 0].draw(g, 0, 0, now, mirror);
+        return;
+      }
+    }
+  }
+
   draw(g: CanvasRenderingContext2D, w: number, h: number, now: number, dpr: number): void {
     const hudAlpha = this.hideTargetAlpha.valueAt(now);
     if (hudAlpha <= 0.001) return;
     g.save();
     g.globalAlpha *= hudAlpha;
 
-    // --- global MainHUDComponents (positions after the DefaultSkinComponentsContainer layout callback)
-    // Wedges: default (0,0) and (4,5), then += (-50, 15).
-    drawWedge(g, -50, 15, 380, 72);
-    drawWedge(g, -46, 20, 380, 72);
-
-    // Health: TopLeft at (50, 20); health line (45x3, CentreLeft) at Y = health.Y + MAIN_PATH_RADIUS.
-    g.save();
-    g.globalAlpha *= this.healthAlpha.valueAt(now);
-    this.health.draw(g, 50, 20, now, dpr);
-    g.fillStyle = '#fff';
-    g.beginPath();
-    if (typeof g.roundRect === 'function') g.roundRect(0, 20 + MAIN_PATH_RADIUS - 1.5, 45, 3, 1.5);
-    else g.rect(0, 20 + MAIN_PATH_RADIUS - 1.5, 45, 3);
-    g.fill();
-    g.restore();
-
-    // Score: Origin TopRight at (50 + 200, wedge.Y + 30).
-    const scoreO = this.score.options(now);
-    const scoreSize = measureArgonText(g, scoreO);
-    drawArgonText(g, 250 - scoreSize.width, 50, scoreO, scoreSize);
-
-    // Accuracy: Anchor/Origin TopRight at (-20, 20).
-    const acc = this.accuracy.measure(g, now);
-    this.accuracy.draw(g, w - 20 - acc.width, 20, now);
-
-    // Song progress: BottomCentre, Position (0, -10), Scale (0.9, 1).
-    this.progress.draw(g, w / 2, h - 10, w * 0.9, now);
-
-    // Key counter: BottomRight at (-(26 + 10), -(10 * 2 + 36 + 10)).
-    this.keyCounter.draw(g, w - 36, h - 66, now);
-
-    // --- ruleset MainHUDComponents
-    if (this.combo) {
-      // ArgonComboCounter: BottomLeft, Scale 1.3, Position (36, -66).
-      const o = this.combo.options(now);
-      const size = measureArgonText(g, o);
+    for (const id of this.componentIds()) {
+      const t = this.componentTransform(id, g, w, h, now);
+      if (!t.l.visible) continue;
+      const o = anchorFraction(t.l.origin);
       g.save();
-      g.translate(36, h - 66);
-      g.scale(1.3, 1.3);
-      drawArgonText(g, 0, -size.height, o, size);
+      g.translate(t.x, t.y);
+      if (t.l.rotation) g.rotate((t.l.rotation * Math.PI) / 180);
+      g.scale(t.l.scaleX, t.l.scaleY);
+      // Relative-width components (song progress) keep their width relative to the screen.
+      const size = id === 'progress' ? { w: t.size.w, h: t.size.h } : t.size;
+      g.translate(-o.x * size.w, -o.y * size.h);
+      this.drawComponent(id, g, size, now, dpr);
       g.restore();
-    }
-    if (this.showHitErrorMeter) {
-      if (this.barMeter) {
-        const y = h / 2 - BarHitErrorMeter.HEIGHT / 2;
-        this.barMeter.draw(g, 0, y, now, false);
-        this.barMeter.draw(g, w - BarHitErrorMeter.WIDTH, y, now, true);
-      }
-      if (this.colourMeters) {
-        const y = h / 2 - this.colourMeters[0].height / 2;
-        this.colourMeters[0].draw(g, 0, y, now, false);
-        this.colourMeters[1].draw(g, w - 8, y, now, true);
-      }
     }
 
     // --- TopRightElements (Margin 10), placed below the lowest top-right anchored component (the accuracy counter).
-    const modsTop = 20 + acc.height + 10;
+    const accBounds = this.layout.accuracy.anchor === 'TopRight' && this.layout.accuracy.visible ? this.componentBounds('accuracy', g, w, h, now) : null;
+    const modsTop = (accBounds ? accBounds.y + accBounds.h : 0) + 10;
     const modsW = this.modDisplay.width(now);
     this.modDisplay.draw(g, w - 10, modsTop, now);
     this.lastModRect = { x: w - 10 - modsW, y: modsTop, w: modsW, h: ModDisplay.ICON };
