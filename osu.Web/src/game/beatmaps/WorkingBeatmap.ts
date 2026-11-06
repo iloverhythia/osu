@@ -40,7 +40,7 @@ export class WorkingBeatmap {
     const blob = this.audioBlob;
     if (!blob) return null;
     if (!this.trackUrl) this.trackUrl = URL.createObjectURL(blob);
-    return new Track(engine, this.trackUrl);
+    return new Track(engine, this.trackUrl, blob);
   }
 
   getBackgroundUrl(): string | null {

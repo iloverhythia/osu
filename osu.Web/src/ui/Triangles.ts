@@ -59,7 +59,7 @@ export class Triangles {
       const x = t.x * w;
       const y = t.y * hgt;
       const l = 22 + t.shade * 18;
-      g.fillStyle = `hsla(${300 + t.shade * 40}, 35%, ${l}%, ${0.25 + this.kick * 0.3})`;
+      g.fillStyle = `hsla(${250 + t.shade * 40}, 35%, ${l}%, ${0.25 + this.kick * 0.3})`;
       g.beginPath();
       g.moveTo(x, y - size * 0.58);
       g.lineTo(x + size * 0.5, y + size * 0.29);

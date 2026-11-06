@@ -2,6 +2,7 @@
 // Port of osu.Game.Rulesets.Osu/OsuRuleset.cs
 
 import type { Beatmap } from '../../beatmaps/Beatmap';
+import { RULESET_DISPLAY_NAMES } from '../../../brand';
 import { ModSet } from '../../mods/Mods';
 import { HitResult } from '../../scoring/HitResult';
 import type { DrawableRuleset, GameplayContext, PlayableBeatmap, Ruleset } from '../Ruleset';
@@ -13,7 +14,7 @@ import { OsuHealthProcessor, OsuScoreProcessor, osuScoreMultiplier } from './sco
 export const osuRuleset: Ruleset = {
   id: 0,
   shortName: 'osu',
-  name: 'osu!',
+  name: RULESET_DISPLAY_NAMES[0],
   availableMods: ['EZ', 'NF', 'HT', 'DC', 'HR', 'SD', 'PF', 'DT', 'NC', 'HD', 'FL', 'AC', 'DA', 'MR', 'AT', 'CN', 'RX', 'AP', 'SO'],
 
   actions: () => [

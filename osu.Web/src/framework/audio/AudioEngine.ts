@@ -133,23 +133,37 @@ export class AudioEngine {
   }
 }
 
-/** A music track backed by an HTMLAudioElement (supports tempo change without pitch change). */
+/**
+ * A music track. Normally backed by an HTMLAudioElement (supports tempo change without pitch change); if the element can't
+ * load the file (e.g. a sandbox's media policy blocks blob: URLs), it falls back to decoding the file with Web Audio and playing
+ * an AudioBuffer (tempo changes then also change pitch).
+ */
 export class Track {
   readonly element: HTMLAudioElement;
   private source: MediaElementAudioSourceNode | null = null;
   private _rate = 1;
   private _preservePitch = true;
+  private _volume = 1;
+  private _loop = false;
   readonly ready: Promise<void>;
   private failed = false;
+
+  // Web Audio fallback
+  private buffer: AudioBuffer | null = null;
+  private bufferNode: AudioBufferSourceNode | null = null;
+  private bufferGain: GainNode | null = null;
+  private bufferOffset = 0; // track position (s) when playback (re)started
+  private bufferStartedAt = 0; // ctx.currentTime when playback (re)started
+  private bufferPlaying = false;
 
   constructor(
     private readonly engine: AudioEngine,
     url: string,
+    private readonly blob?: Blob,
   ) {
     const el = new Audio();
     el.preload = 'auto';
     el.crossOrigin = 'anonymous';
-    el.src = url;
     this.element = el;
     this.ready = new Promise<void>(resolve => {
       const done = () => resolve();
@@ -158,17 +172,35 @@ export class Track {
       el.addEventListener(
         'error',
         () => {
-          this.failed = true;
-          resolve();
+          void this.loadFallback().finally(done);
         },
         { once: true },
       );
     });
+    el.src = url;
     try {
       this.source = engine.ctx.createMediaElementSource(el);
       this.source.connect(engine.music.gain);
     } catch {
       this.source = null;
+    }
+  }
+
+  private async loadFallback(): Promise<void> {
+    if (!this.blob) {
+      this.failed = true;
+      return;
+    }
+    try {
+      this.buffer = await this.engine.decode(await this.blob.arrayBuffer());
+    } catch {
+      this.buffer = null;
+    }
+    if (!this.buffer) this.failed = true;
+    else {
+      this.bufferGain = this.engine.ctx.createGain();
+      this.bufferGain.gain.value = this._volume;
+      this.bufferGain.connect(this.engine.music.gain);
     }
   }
 
@@ -178,15 +210,29 @@ export class Track {
 
   /** Track length in ms. */
   get length(): number {
+    if (this.buffer) return this.buffer.duration * 1000;
     const d = this.element.duration;
     return Number.isFinite(d) ? d * 1000 : 0;
   }
 
   get currentTime(): number {
+    if (this.buffer) {
+      if (!this.bufferPlaying) return this.bufferOffset * 1000;
+      let t = this.bufferOffset + (this.engine.ctx.currentTime - this.bufferStartedAt) * this._rate;
+      if (this._loop) t %= this.buffer.duration;
+      return Math.min(t, this.buffer.duration) * 1000;
+    }
     return this.element.currentTime * 1000;
   }
 
   set currentTime(ms: number) {
+    if (this.buffer) {
+      const wasPlaying = this.bufferPlaying;
+      this.stopBuffer();
+      this.bufferOffset = Math.max(0, ms / 1000);
+      if (wasPlaying) this.startBuffer();
+      return;
+    }
     try {
       this.element.currentTime = Math.max(0, ms / 1000);
     } catch {
@@ -195,16 +241,28 @@ export class Track {
   }
 
   get isRunning(): boolean {
+    if (this.buffer) return this.bufferPlaying && !this.hasEnded;
     return !this.element.paused && !this.element.ended;
   }
 
   get hasEnded(): boolean {
+    if (this.buffer) return !this._loop && this.currentTime >= this.length - 1;
     return this.element.ended;
   }
 
   set rate(r: number) {
+    if (this.buffer && this.bufferPlaying) {
+      // Re-anchor so position stays continuous across the rate change.
+      this.bufferOffset = this.currentTime / 1000;
+      this.bufferStartedAt = this.engine.ctx.currentTime;
+    }
     this._rate = r;
-    this.element.playbackRate = r;
+    if (this.bufferNode) this.bufferNode.playbackRate.value = r;
+    try {
+      this.element.playbackRate = r;
+    } catch {
+      /* unsupported rate */
+    }
   }
 
   get rate(): number {
@@ -224,11 +282,52 @@ export class Track {
   }
 
   set volume(v: number) {
-    this.element.volume = Math.max(0, Math.min(1, v));
+    this._volume = Math.max(0, Math.min(1, v));
+    this.element.volume = this._volume;
+    if (this.bufferGain) this.bufferGain.gain.value = this._volume;
+  }
+
+  get volume(): number {
+    return this._volume;
+  }
+
+  set loop(v: boolean) {
+    this._loop = v;
+    this.element.loop = v;
+    if (this.bufferNode) this.bufferNode.loop = v;
+  }
+
+  private startBuffer(): void {
+    if (!this.buffer || !this.bufferGain) return;
+    const node = this.engine.ctx.createBufferSource();
+    node.buffer = this.buffer;
+    node.loop = this._loop;
+    node.playbackRate.value = this._rate;
+    node.connect(this.bufferGain);
+    node.start(0, Math.min(this.bufferOffset, this.buffer.duration));
+    this.bufferNode = node;
+    this.bufferStartedAt = this.engine.ctx.currentTime;
+    this.bufferPlaying = true;
+  }
+
+  private stopBuffer(): void {
+    if (this.bufferPlaying) this.bufferOffset = this.currentTime / 1000;
+    this.bufferPlaying = false;
+    try {
+      this.bufferNode?.stop();
+    } catch {
+      /* already stopped */
+    }
+    this.bufferNode?.disconnect();
+    this.bufferNode = null;
   }
 
   async start(): Promise<void> {
     await this.engine.resume();
+    if (this.buffer) {
+      if (!this.bufferPlaying) this.startBuffer();
+      return;
+    }
     try {
       await this.element.play();
     } catch {
@@ -237,10 +336,16 @@ export class Track {
   }
 
   stop(): void {
+    if (this.buffer) {
+      this.stopBuffer();
+      return;
+    }
     this.element.pause();
   }
 
   dispose(): void {
+    this.stopBuffer();
+    this.bufferGain?.disconnect();
     this.element.pause();
     this.source?.disconnect();
     this.element.removeAttribute('src');

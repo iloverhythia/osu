@@ -759,7 +759,7 @@ export class PlayerScreen extends Screen {
       const t = Math.min(1, (now - this.failAnimationStart) / 1500);
       // Browsers only support playback rates down to 0.0625.
       this.track.rate = Math.max(0.1, this.mods.rate * (1 - t));
-      this.track.element.volume = Math.max(0, 1 - t);
+      this.track.volume = Math.max(0, 1 - t);
       if (t >= 1) this.track.stop();
     }
 
@@ -870,7 +870,7 @@ export class PlayerScreen extends Screen {
     g.fillStyle = 'rgba(0,0,0,0.4)';
     roundRect(g, 16, 16, barW, 10 * ui, 5 * ui);
     g.fill();
-    g.fillStyle = hp < 0.3 ? '#ff5a5a' : '#ff66aa';
+    g.fillStyle = hp < 0.3 ? '#ff5a5a' : '#7b61ff';
     roundRect(g, 16, 16, Math.max(0, barW * hp), 10 * ui, 5 * ui);
     g.fill();
 
@@ -945,7 +945,7 @@ export class PlayerScreen extends Screen {
       g.textBaseline = 'middle';
       for (const a of this.actions) {
         const held = (this.heldActions.get(a.id) ?? 0) > 0;
-        g.fillStyle = held ? '#ff66aa' : 'rgba(0,0,0,0.45)';
+        g.fillStyle = held ? '#7b61ff' : 'rgba(0,0,0,0.45)';
         roundRect(g, x, y, size, size, 8);
         g.fill();
         g.fillStyle = '#fff';

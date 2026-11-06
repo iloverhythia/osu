@@ -6,7 +6,9 @@ import { availableRulesets } from '../../game/rulesets';
 import type { Ruleset } from '../../game/rulesets/Ruleset';
 import { clear, h, keyLabel } from '../dom';
 import type { Game } from '../Game';
+import { ATTRIBUTION, RULESET_DISPLAY_NAMES } from '../../brand';
 import { skinSettingsSection } from './SkinSettings';
+import { confirmDialog } from '../confirm';
 
 function slider(label: string, key: string, min: number, max: number, step: number, format: (v: number) => string, hint?: string): HTMLElement {
   const value = h('span', { class: 'value' }, format(settings.get(key, 0)));
@@ -156,7 +158,7 @@ export function openSettings(game: Game): void {
     toggle('Beatmap skins', 'skin.beatmapSkins', 'Use skin elements and hitsounds included with beatmaps.'),
     skinSettingsSection(game),
 
-    h('h3', null, 'osu!'),
+    h('h3', null, RULESET_DISPLAY_NAMES[0]),
     slider('Cursor size', 'osu.cursorSize', 0.5, 2, 0.05, v => `${v.toFixed(2)}x`),
     toggle('Cursor trail', 'osu.cursorTrail'),
     toggle('Follow points', 'osu.followPoints'),
@@ -164,14 +166,14 @@ export function openSettings(game: Game): void {
     toggle('Snaking out sliders', 'osu.snakingOut'),
     toggle('Hit lighting', 'osu.hitLighting'),
 
-    h('h3', null, 'osu!mania'),
+    h('h3', null, RULESET_DISPLAY_NAMES[3]),
     slider('Scroll speed', 'mania.scrollSpeed', 1, 40, 1, v => String(v)),
     choice('Scroll direction', 'mania.scrollDirection', [
       ['down', 'Down'],
       ['up', 'Up'],
     ]),
 
-    h('h3', null, 'osu!taiko'),
+    h('h3', null, RULESET_DISPLAY_NAMES[1]),
     toggle('Hit animations', 'taiko.hitAnimations'),
     toggle('Rate-adjusted hit animation', 'taiko.rateAdjustedHitAnimation'),
     toggle('Show combo on drum', 'taiko.drumCombo'),
@@ -181,7 +183,7 @@ export function openSettings(game: Game): void {
       ['KKDD', 'KKDD'],
     ]),
 
-    h('h3', null, 'osu!catch'),
+    h('h3', null, RULESET_DISPLAY_NAMES[2]),
     toggle('Hit lighting', 'fruits.hitLighting'),
     slider('Positional hitsounds', 'fruits.positionalHitsoundsLevel', 0, 1, 0.05, pct),
     slider('Touch zone width', 'fruits.touchZoneWidth', 0.05, 0.5, 0.01, pct),
@@ -201,14 +203,14 @@ export function openSettings(game: Game): void {
       {
         class: 'btn danger small',
         onclick: async () => {
-          if (!confirm('Delete all imported beatmaps and scores from this browser?')) return;
+          if (!(await confirmDialog(game, 'Delete all imported beatmaps, scores and replays from this browser?', 'Delete everything'))) return;
           indexedDB.deleteDatabase('osu-web');
           location.reload();
         },
       },
       'Delete all beatmaps & scores',
     ),
-    h('p', { style: { color: 'var(--fg-faint)', fontSize: '12px', lineHeight: '1.6', marginTop: '24px' } }, 'osu!web is a TypeScript port of osu!lazer gameplay. osu! is a trademark of ppy Pty Ltd. Source code is MIT licensed.'),
+    h('p', { style: { color: 'var(--fg-faint)', fontSize: '12px', lineHeight: '1.6', marginTop: '24px' } }, ATTRIBUTION),
   );
 
   const el = h(

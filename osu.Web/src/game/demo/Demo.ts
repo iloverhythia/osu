@@ -211,7 +211,7 @@ export async function renderDemoBackground(): Promise<Blob | null> {
     const y = rnd() * 720;
     const s = 20 + rnd() * 120;
     g.globalAlpha = 0.05 + rnd() * 0.12;
-    g.fillStyle = rnd() > 0.5 ? '#ff66aa' : '#66ccff';
+    g.fillStyle = rnd() > 0.5 ? '#7b61ff' : '#2fd3c1';
     g.beginPath();
     g.moveTo(x, y - s);
     g.lineTo(x + s * 0.87, y + s * 0.5);
@@ -241,11 +241,11 @@ ${extra}
 BeatDivisor: 4
 
 [Metadata]
-Title:osu!web demo
-TitleUnicode:osu!web demo
-Artist:osu!web
-ArtistUnicode:osu!web
-Creator:osu!web
+Title:Hitcircle demo
+TitleUnicode:Hitcircle demo
+Artist:Hitcircle
+ArtistUnicode:Hitcircle
+Creator:Hitcircle
 Version:${version}
 Source:
 Tags:demo tutorial generated
@@ -425,9 +425,9 @@ export function getDemoSet(): Promise<BeatmapSetRecord> {
     cached = (async () => {
       const [audio, bg] = await Promise.all([renderDemoTrack(), renderDemoBackground()]);
       const maps: Record<string, string> = {
-        'osu!web - demo (osu!web) [Easy].osu': generateOsuMap('Easy', { hp: 3, cs: 3, od: 3, ar: 4, sv: 1.0 }, { divisor: 1, sliderBeats: 1.5, sv: 1.0, spacing: 110 }),
-        'osu!web - demo (osu!web) [Normal].osu': generateOsuMap('Normal', { hp: 5, cs: 4, od: 6, ar: 7, sv: 1.4 }, { divisor: 2, sliderBeats: 1, sv: 1.4, spacing: 130 }),
-        'osu!web - demo (osu!web) [4K Groove].osu': generateManiaMap(),
+        'Hitcircle - demo (Hitcircle) [Easy].osu': generateOsuMap('Easy', { hp: 3, cs: 3, od: 3, ar: 4, sv: 1.0 }, { divisor: 1, sliderBeats: 1.5, sv: 1.0, spacing: 110 }),
+        'Hitcircle - demo (Hitcircle) [Normal].osu': generateOsuMap('Normal', { hp: 5, cs: 4, od: 6, ar: 7, sv: 1.4 }, { divisor: 2, sliderBeats: 1, sv: 1.4, spacing: 130 }),
+        'Hitcircle - demo (Hitcircle) [4K Groove].osu': generateManiaMap(),
       };
       const files: Record<string, Blob> = { 'audio.wav': audio };
       if (bg) files['bg.jpg'] = bg;

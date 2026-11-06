@@ -1,6 +1,7 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // Port of osu.Game.Rulesets.Taiko/TaikoRuleset.cs
 
+import { RULESET_DISPLAY_NAMES } from '../../../brand';
 import type { Beatmap } from '../../beatmaps/Beatmap';
 import type { ModSet } from '../../mods/Mods';
 import { HitResult } from '../../scoring/HitResult';
@@ -13,7 +14,7 @@ import { TaikoHealthProcessor, TaikoScoreProcessor, taikoScoreMultiplier } from 
 export const taikoRuleset: Ruleset = {
   id: 1,
   shortName: 'taiko',
-  name: 'osu!taiko',
+  name: RULESET_DISPLAY_NAMES[1],
   availableMods: ['EZ', 'NF', 'HT', 'DC', 'HR', 'SD', 'PF', 'DT', 'NC', 'HD', 'FL', 'AC', 'DA', 'RD', 'AT', 'CN', 'RX'],
 
   actions: () => [

@@ -5,7 +5,8 @@ export default defineConfig({
   base: './',
   build: {
     target: 'es2022',
-    sourcemap: true,
+    // The artifact build ships without source maps (it is published as a handful of files).
+    sourcemap: process.env.VITE_TARGET !== 'artifact',
   },
   test: {
     environment: 'node',

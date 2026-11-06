@@ -1,6 +1,7 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // Port of osu.Game.Rulesets.Catch/CatchRuleset.cs (+ CatchInputManager.cs actions / default key bindings).
 
+import { RULESET_DISPLAY_NAMES } from '../../../brand';
 import type { Beatmap } from '../../beatmaps/Beatmap';
 import type { ModSet } from '../../mods/Mods';
 import { HitResult } from '../../scoring/HitResult';
@@ -27,7 +28,7 @@ function asCatchPlayable(playable: PlayableBeatmap): CatchPlayableBeatmap {
 export const catchRuleset: Ruleset = {
   id: 2,
   shortName: 'fruits',
-  name: 'osu!catch',
+  name: RULESET_DISPLAY_NAMES[2],
 
   availableMods: ['EZ', 'NF', 'HT', 'DC', 'HR', 'SD', 'PF', 'DT', 'NC', 'HD', 'FL', 'AC', 'DA', 'MR', 'AT', 'CN', 'RX'],
 

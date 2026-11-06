@@ -168,15 +168,15 @@ export class Game {
     if (this.previewTrack !== track) return;
     const preview = working.entry.previewTime;
     track.currentTime = fromStart ? 0 : preview > 0 ? preview : track.length * 0.4;
-    track.element.loop = true;
-    track.element.volume = 0;
+    track.loop = true;
+    track.volume = 0;
     await track.start();
     // Fade in.
     const startAt = performance.now();
     const fade = () => {
       if (this.previewTrack !== track) return;
       const t = Math.min(1, (performance.now() - startAt) / 800);
-      track.element.volume = t;
+      track.volume = t;
       if (t < 1) requestAnimationFrame(fade);
     };
     fade();

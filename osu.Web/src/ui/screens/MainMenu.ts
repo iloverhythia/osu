@@ -2,6 +2,7 @@
 // Intro + main menu (IntroScreen / MainMenu essentials).
 
 import { h } from '../dom';
+import { APP_NAME, ATTRIBUTION } from '../../brand';
 import type { Game } from '../Game';
 import { openSettings } from '../overlays/Settings';
 import { Screen } from '../Screen';
@@ -19,7 +20,7 @@ export class MainMenuScreen extends Screen {
   constructor(game: Game) {
     super(game, 'menu');
     this.backgroundDim = 0.55;
-    this.logo = h('button', { class: 'logo', 'aria-label': 'Start', onclick: () => this.onLogo() }, 'osu!');
+    this.logo = h('button', { class: 'logo', 'aria-label': 'Start', onclick: () => this.onLogo() }, h('span', { class: 'logo-word' }, APP_NAME));
     this.hint = h('div', { class: 'splash-hint' }, 'Click the circle to start');
     this.nowPlaying = h('div', { class: 'now-playing' });
     this.buttons = h(
@@ -37,7 +38,7 @@ export class MainMenuScreen extends Screen {
       h(
         'div',
         { class: 'menu-footer' },
-        h('span', null, 'osu!web — a browser port of osu!lazer'),
+        h('span', { class: 'attribution' }, `${APP_NAME} · ${ATTRIBUTION}`),
         h('span', null, 'Drop .osz files anywhere to import · ', h('span', { class: 'kbd' }, 'Ctrl'), ' + ', h('span', { class: 'kbd' }, 'O'), ' settings'),
       ),
     );

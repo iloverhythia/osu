@@ -2,6 +2,7 @@
 // Song select (port of the essentials of SongSelect / BeatmapCarousel / BeatmapInfoWedge / BeatmapLeaderboard).
 
 import { settings } from '../../framework/Settings';
+import { RULESET_DISPLAY_NAMES } from '../../brand';
 import { ModSet, applyCommonDifficultyMods, applyDifficultyAdjust } from '../../game/mods/Mods';
 import { availableRulesets } from '../../game/rulesets';
 import type { Ruleset } from '../../game/rulesets/Ruleset';
@@ -14,12 +15,13 @@ import type { Game } from '../Game';
 import { openModSelect } from '../overlays/ModSelect';
 import { openSettings } from '../overlays/Settings';
 import { Screen } from '../Screen';
+import { confirmDialog } from '../confirm';
 import { PlayerScreen } from './Player';
 import { MOD_BY_ACRONYM, MOD_TYPE_COLOURS } from '../../game/mods/Mods';
 
 type SortMode = 'title' | 'artist' | 'creator' | 'difficulty' | 'length' | 'added' | 'bpm';
 
-const RULESET_NAMES = ['osu!', 'osu!taiko', 'osu!catch', 'osu!mania'];
+const RULESET_NAMES = RULESET_DISPLAY_NAMES;
 
 export class SongSelectScreen extends Screen {
   private carousel: HTMLDivElement;
@@ -457,7 +459,7 @@ export class SongSelectScreen extends Screen {
   }
 
   private async deleteSet(set: BeatmapSetRecord): Promise<void> {
-    if (!confirm(`Delete "${set.beatmaps[0].title}" and all its difficulties?`)) return;
+    if (!(await confirmDialog(this.game, `Delete "${set.beatmaps[0].title}" and all its difficulties?`, 'Delete'))) return;
     this.game.working = null;
     await this.game.library.remove(set.id);
     this.game.toast('Beatmap set deleted');

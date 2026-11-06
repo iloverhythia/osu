@@ -161,7 +161,8 @@ export class ResultsScreen extends Screen {
           h('button', { class: 'btn primary', onclick: () => this.retry() }, 'Retry'),
           h('button', { class: 'btn', onclick: () => this.game.back() }, 'Back to song select'),
           r.replay && r.replay.events.length > 0 ? h('button', { class: 'btn', onclick: () => this.watchReplay() }, 'Watch replay') : null,
-          r.replay && r.replay.events.length > 0 && r.ruleset.id !== 2 ? h('button', { class: 'btn ghost', onclick: () => void this.exportOsr() }, 'Export .osr') : null,
+          // Downloads are blocked inside the artifact viewer, so the .osr export is only offered on the full site.
+          r.replay && r.replay.events.length > 0 && r.ruleset.id !== 2 && import.meta.env.VITE_TARGET !== 'artifact' ? h('button', { class: 'btn ghost', onclick: () => void this.exportOsr() }, 'Export .osr') : null,
           !r.mods.isRanked ? h('span', { style: { color: 'var(--fg-dim)', alignSelf: 'center', fontSize: '13px' } }, 'Score not saved (unranked mods)') : null,
         ),
       ),

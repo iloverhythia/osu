@@ -1,6 +1,7 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // Port of osu.Game.Rulesets.Mania/ManiaRuleset.cs
 
+import { RULESET_DISPLAY_NAMES } from '../../../brand';
 import type { Beatmap } from '../../beatmaps/Beatmap';
 import type { ModSet } from '../../mods/Mods';
 import type { HealthProcessor } from '../../scoring/HealthProcessor';
@@ -33,7 +34,7 @@ const RESULT_LABELS: Partial<Record<HitResult, string>> = {
 export const maniaRuleset: Ruleset = {
   id: 3,
   shortName: 'mania',
-  name: 'osu!mania',
+  name: RULESET_DISPLAY_NAMES[3],
   availableMods: MANIA_MODS,
 
   actions(variant?: string): RulesetAction[] {
