@@ -4,6 +4,7 @@
 // Judgements/HoldNoteJudgementResult.cs, UI/{Column,Stage,OrderedHitPolicy,DrawableManiaRuleset,PlayfieldCoveringWrapper}.cs,
 // GameplaySampleTriggerSource.cs, ManiaModHidden/FadeIn/Flashlight, and draws an argon-like skin procedurally.
 
+import { ManiaLegacySkinRenderer, type ManiaLegacyColumn } from './legacySkin';
 import { generateBarLines, type BarLine } from '../../../objects/BarLineGenerator';
 import { COLOURS } from '../../../Skin';
 import { HitResult, isHit } from '../../../scoring/HitResult';
@@ -218,6 +219,9 @@ export class DrawableManiaRuleset implements DrawableRuleset {
   readonly leadInTime: number;
 
   private readonly columns: ColumnState[] = [];
+  /** Legacy skin renderer, when the user skin provides osu!mania elements (ManiaLegacySkinTransformer). */
+  private readonly legacy: ManiaLegacySkinRenderer | null = null;
+  private legacyColumns: ManiaLegacyColumn[] = [];
   private readonly holds: DHold[] = [];
   private readonly allObjects: DObj[] = [];
   private readonly scroll: SequentialScroll;
@@ -279,6 +283,18 @@ export class DrawableManiaRuleset implements DrawableRuleset {
       }
     });
     this.stageJudgements = playable.stages.map(() => null);
+
+    if (ctx.skin.sources && ctx.skin.sources.length > 0) {
+      this.legacy = ManiaLegacySkinRenderer.create(ctx.skin.sources, this.columns.length);
+      let inStageStart = 0;
+      for (const stageColumns of playable.stages) {
+        for (let i = 0; i < stageColumns; i++) {
+          const c = this.columns[inStageStart + i];
+          this.legacyColumns.push({ index: c.index, inStage: i, stageColumns, special: c.special });
+        }
+        inStageStart += stageColumns;
+      }
+    }
 
     for (const h of objects) {
       const d: DObj = h instanceof HoldNote ? new DHold(h) : new DNote(h as Note, null);
@@ -731,8 +747,10 @@ export class DrawableManiaRuleset implements DrawableRuleset {
       let w = 0;
       for (let i = 0; i < stageColumns; i++, ci++) {
         const c = this.columns[ci];
-        c.width = COLUMN_WIDTH * (c.special ? 2 : 1);
-        w += c.width + COLUMN_SPACING * 2;
+        const L = this.legacy;
+        // Legacy skins: ColumnWidth / ColumnSpacing from the [Mania] section for this key count.
+        c.width = L ? L.columnWidth(ci) : COLUMN_WIDTH * (c.special ? 2 : 1);
+        w += c.width + (L ? L.leftColumnSpacing(ci) + L.rightColumnSpacing(ci) : COLUMN_SPACING * 2);
       }
       stageWidths.push(w);
     }
@@ -763,16 +781,22 @@ export class DrawableManiaRuleset implements DrawableRuleset {
       let cx = x;
       for (let i = 0; i < stageColumns; i++, ci++) {
         const c = this.columns[ci];
-        c.x = cx + COLUMN_SPACING;
-        cx += c.width + COLUMN_SPACING * 2;
+        const L = this.legacy;
+        const left = L ? L.leftColumnSpacing(ci) : COLUMN_SPACING;
+        const right = L ? L.rightColumnSpacing(ci) : COLUMN_SPACING;
+        c.x = cx + left;
+        cx += c.width + left + right;
       }
       x += stageWidths[s] + STAGE_SPACING;
     });
 
-    const top = STAGE_PADDING;
-    const bottom = H - STAGE_PADDING;
-    const scrollLength = Math.max(1, bottom - top - HIT_TARGET_POSITION);
-    const hitY = this.upwards ? top + HIT_TARGET_POSITION : bottom - HIT_TARGET_POSITION;
+    // Legacy skins have no stage padding and use their HitPosition.
+    const padding = this.legacy ? 0 : STAGE_PADDING;
+    const hitPosition = this.legacy ? this.legacy.hitPosition : HIT_TARGET_POSITION;
+    const top = padding;
+    const bottom = H - padding;
+    const scrollLength = Math.max(1, bottom - top - hitPosition);
+    const hitY = this.upwards ? top + hitPosition : bottom - hitPosition;
 
     return { width, height, scale, W, H, stageLeft, stageWidth: stageWidths, hitY, scrollLength, top, bottom };
   }
@@ -853,6 +877,17 @@ export class DrawableManiaRuleset implements DrawableRuleset {
   private drawColumnBackgrounds(ctx: CanvasRenderingContext2D, l: Layout, time: number): void {
     const { y, h } = this.stageVerticalExtent(l);
 
+    const L = this.legacy;
+    if (L) {
+      for (let s = 0; s < this.playable.stages.length; s++) {
+        const cols = this.columns.filter(c => c.stage === s).map(c => ({ col: this.legacyColumns[c.index], x: c.x, width: c.width }));
+        L.drawStage(ctx, l.stageLeft[s], l.stageWidth[s], y, h, cols, this.upwards);
+        L.drawHitTarget(ctx, l.stageLeft[s], l.stageWidth[s], l.hitY);
+      }
+      for (const c of this.columns) L.drawColumnLight(ctx, this.legacyColumns[c.index], c.x, c.width, this.upwards ? l.top : l.bottom, this.upwards, c.down, c.pressTime, c.releaseTime, time);
+      return;
+    }
+
     for (const c of this.columns) {
       // ArgonColumnBackground: accent darkened (x4) at 80% opacity.
       ctx.fillStyle = css(darkenC4(c.colour, 3), 0.8);
@@ -908,6 +943,8 @@ export class DrawableManiaRuleset implements DrawableRuleset {
   }
 
   private drawHitTargets(ctx: CanvasRenderingContext2D, l: Layout): void {
+    // Legacy skins sandwich the hit target between the column background and the column light (drawn in drawColumnBackgrounds).
+    if (this.legacy) return;
     // ArgonHitTarget: 30% white additive strip of the note accent height at the hit position.
     const h = NOTE_HEIGHT * NOTE_ACCENT_RATIO;
     ctx.save();
@@ -921,6 +958,10 @@ export class DrawableManiaRuleset implements DrawableRuleset {
   }
 
   private drawObjects(ctx: CanvasRenderingContext2D, l: Layout, time: number, currentRel: number): void {
+    if (this.legacy) {
+      this.drawObjectsLegacy(ctx, this.legacy, l, time, currentRel);
+      return;
+    }
     const maxPos = l.scrollLength + STAGE_PADDING + NOTE_HEIGHT;
     const minPos = -(HIT_TARGET_POSITION + STAGE_PADDING + NOTE_HEIGHT);
 
@@ -939,6 +980,63 @@ export class DrawableManiaRuleset implements DrawableRuleset {
         } else {
           this.drawHold(ctx, l, c, obj, time, currentRel, startPos, minPos);
         }
+      }
+    }
+  }
+
+  /** Notes and hold notes with legacy skin pieces (LegacyNotePiece, LegacyHoldNoteHead/TailPiece, LegacyBodyPiece). */
+  private drawObjectsLegacy(ctx: CanvasRenderingContext2D, L: ManiaLegacySkinRenderer, l: Layout, time: number, currentRel: number): void {
+    const up = this.upwards;
+    const dir = up ? 1 : -1;
+    for (const c of this.columns) {
+      const col = this.legacyColumns[c.index];
+      const noteH = L.noteHeight(col, 'note');
+      const maxPos = l.scrollLength + l.H;
+      const minPos = -(l.H + noteH);
+      const objects = c.objects;
+      for (let i = c.firstActive; i < objects.length; i++) {
+        const obj = objects[i];
+        const startPos = this.positionAt(obj.startTime, currentRel, l);
+        if (startPos > maxPos) break;
+
+        if (obj instanceof DNote) {
+          if (startPos < minPos) continue;
+          const alpha = this.objectAlpha(obj, time);
+          if (alpha > 0) L.drawNote(ctx, col, c.x, c.width, this.yAt(startPos, l), up, 'note', alpha, false, time);
+          continue;
+        }
+
+        const hold = obj;
+        const endPos = this.positionAt(hold.obj.endTime, currentRel, l);
+        if (endPos < minPos) continue;
+        const alpha = this.objectAlpha(hold, time);
+        if (alpha <= 0) continue;
+        const dim = hold.isMissing;
+        const holding = time >= hold.obj.startTime && hold.head.isHit && !hold.droppedHoldAfter(hold.obj.startTime);
+        const headPos = holding ? Math.max(0, startPos) : startPos;
+        const headH = L.noteHeight(col, 'head');
+        const tailH = L.noteHeight(col, 'tail');
+        const headEdge = this.yAt(headPos, l);
+        const tailEdge = this.yAt(endPos, l);
+        // DrawableHoldNote: the body spans from the middle of the head to the middle of the tail.
+        const bodyA = headEdge + dir * (headH / 2);
+        const bodyB = tailEdge + dir * (tailH / 2);
+
+        ctx.save();
+        if (holding) {
+          const clipY = this.yAt(0, l) + dir * (headH / 2);
+          ctx.beginPath();
+          if (up) ctx.rect(c.x, clipY, c.width, l.H - clipY);
+          else ctx.rect(c.x, 0, c.width, clipY);
+          ctx.clip();
+        }
+        const isHolding = holding && hold.isHolding(time);
+        L.drawBody(ctx, col, c.x, c.width, Math.min(bodyA, bodyB), Math.max(bodyA, bodyB), up, alpha, isHolding, hold.obj.startTime, dim, time);
+        if (!(hold.tail.judged && hold.tail.isHit)) L.drawNote(ctx, col, c.x, c.width, tailEdge, up, 'tail', alpha, dim, time);
+        ctx.restore();
+
+        L.drawNote(ctx, col, c.x, c.width, headEdge, up, 'head', alpha, dim, time);
+        if (isHolding) L.drawHoldLight(ctx, col, c.x, c.width, l.hitY, alpha, hold.obj.startTime, time);
       }
     }
   }
@@ -1173,6 +1271,10 @@ export class DrawableManiaRuleset implements DrawableRuleset {
   }
 
   private drawKeyAreas(ctx: CanvasRenderingContext2D, l: Layout, time: number): void {
+    if (this.legacy) {
+      for (const c of this.columns) this.legacy.drawKey(ctx, this.legacyColumns[c.index], c.x, c.width, this.upwards ? l.top : l.bottom, this.upwards, c.down, c.releaseTime, time);
+      return;
+    }
     // ArgonKeyArea: from just before the hit target to the end of the stage.
     const areaH = HIT_TARGET_POSITION + CORNER_RADIUS * 2;
     const up = this.upwards;
@@ -1261,6 +1363,18 @@ export class DrawableManiaRuleset implements DrawableRuleset {
   }
 
   private drawExplosions(ctx: CanvasRenderingContext2D, l: Layout, time: number): void {
+    if (this.legacy) {
+      for (const c of this.columns) {
+        const e = c.explosion;
+        if (!e) continue;
+        if (time - e.time >= EXPLOSION_DURATION) {
+          c.explosion = null;
+          continue;
+        }
+        this.legacy.drawExplosion(ctx, this.legacyColumns[c.index], c.x, c.width, l.hitY, e.time, time);
+      }
+      return;
+    }
     // ArgonHitExplosion: an additive glow over the hit target, fading out over 200ms.
     const h = NOTE_HEIGHT * NOTE_ACCENT_RATIO;
     for (const c of this.columns) {
@@ -1294,10 +1408,12 @@ export class DrawableManiaRuleset implements DrawableRuleset {
         continue;
       }
 
+      const cx = l.stageLeft[s] + l.stageWidth[s] / 2;
+      if (this.legacy?.drawJudgement(ctx, j.result, cx, l.top, l.bottom - l.top, this.upwards, j.time, time)) continue;
+
       const text = JUDGEMENT_TEXT[j.result];
       if (!text) continue;
 
-      const cx = l.stageLeft[s] + l.stageWidth[s] / 2;
       let cy = this.upwards ? l.hitY + JUDGEMENT_Y : l.hitY - JUDGEMENT_Y;
       let scale: number;
       let rotation = 0;

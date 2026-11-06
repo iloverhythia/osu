@@ -41,7 +41,6 @@ export class ManiaLegacySkinRenderer {
   private readonly source: SkinSource;
   private readonly version: number | null;
   private readonly cache = new Map<string, SkinAnimation | null>();
-  private readonly keyStates = new Map<number, { down: boolean; up: Prop; downAlpha: Prop }>();
   private readonly lightStates = new Map<number, { alpha: Prop; scaleY: Prop; pressTime: number }>();
   private readonly judgementRotation = new Map<number, number>();
 
@@ -210,10 +209,12 @@ export class ManiaLegacySkinRenderer {
     const t = anim.frameAt(time);
     const sx = width / displayWidth(t);
     const sy = this.widthForNoteHeightScale / displayWidth(t);
-    // tails invert the scrolling direction
+    const h = displayHeight(t) * sy;
+    // Tails invert the scrolling direction (LegacyHoldNoteTailPiece): the flipped sprite fills the tail's box from its far edge.
     const flipped = kind === 'tail' ? !up : up;
-    drawSprite(g, t, x, edgeY, { scaleX: sx, scaleY: flipped ? -sy : sy, originX: 0, originY: 1, alpha, colour: dim ? [169, 169, 169] : undefined });
-    return displayHeight(t) * sy;
+    const y = kind === 'tail' ? (up ? edgeY + h : edgeY - h) : edgeY;
+    drawSprite(g, t, x, y, { scaleX: sx, scaleY: flipped ? -sy : sy, originX: 0, originY: 1, alpha, colour: dim ? [169, 169, 169] : undefined });
+    return h;
   }
 
   /** Height of a note piece (for positioning hold note bodies). */

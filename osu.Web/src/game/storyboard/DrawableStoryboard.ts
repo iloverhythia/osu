@@ -177,6 +177,9 @@ export class DrawableStoryboard {
 
   private readonly state = new SpriteState();
   private lastUpdateTime = NaN;
+  private lastSyncTime = NaN;
+  private lastSyncRunning = false;
+  private lastSyncRate = NaN;
   private passing = true;
   private nextEvictionTime = -Infinity;
 
@@ -258,6 +261,11 @@ export class DrawableStoryboard {
     for (const layer of this.layers) layer.enabled = frame.passing ? layer.layer.visibleWhenPassing : layer.layer.visibleWhenFailing;
     if (this.overlayLayer) this.overlayLayer.enabled = frame.passing ? this.overlayLayer.layer.visibleWhenPassing : this.overlayLayer.layer.visibleWhenFailing;
 
+    // drawUnder and drawOver both update; only re-sync audio/video when something changed.
+    if (time === this.lastSyncTime && frame.running === this.lastSyncRunning && frame.rate === this.lastSyncRate) return;
+    this.lastSyncTime = time;
+    this.lastSyncRunning = frame.running;
+    this.lastSyncRate = frame.rate;
     this.samples?.update(time, frame.running, frame.rate);
     for (const v of this.videos) v.update(time, frame.running, frame.rate);
   }
