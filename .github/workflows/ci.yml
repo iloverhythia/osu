@@ -1,4 +1,9 @@
-on: [push, pull_request]
+on:
+  # Changes that only touch the web port (osu.Web, built and tested by web.yml) don't need the .NET build and tests.
+  push:
+    paths-ignore: ['osu.Web/**', '.github/workflows/web.yml']
+  pull_request:
+    paths-ignore: ['osu.Web/**', '.github/workflows/web.yml']
 name: Continuous Integration
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
