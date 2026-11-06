@@ -17,6 +17,7 @@ import { MenuTipDisplay, SongTicker } from '../menu/SongTicker';
 import { Anim, Easing, now as clockNow } from '../menu/Transforms';
 import '../menu/menu.css';
 import { openSettings } from '../overlays/Settings';
+import { openChartGenerator } from '../overlays/ChartGenerator';
 import { Screen } from '../Screen';
 import { SongSelectScreen } from './SongSelect';
 import { applyEasing } from '../../game/storyboard/Easing';
@@ -71,6 +72,14 @@ export class MainMenuScreen extends Screen {
     this.buttons.onSolo = () => this.loadSongSelect();
     this.buttons.onSettings = () => openSettings(this.game);
     this.buttons.onBeatmapListing = () => this.game.openFilePicker();
+    this.buttons.onEdit = () =>
+      openChartGenerator(this.game, {
+        onPlay: () => {
+          const select = new SongSelectScreen(this.game);
+          this.game.push(select);
+          setTimeout(() => select.startSelected(), 700);
+        },
+      });
     this.buttons.onStateChanged = s => {
       // MainMenu: Buttons.StateChanged → background colour (Gray(1) at the logo, Gray(0.8) otherwise).
       if (this.phase !== 'menu') return;

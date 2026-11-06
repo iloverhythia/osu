@@ -18,6 +18,8 @@ export const ICONS = {
   solo: svg('<circle cx="16" cy="10.5" r="5"/><path d="M6.5 27c0-5.5 4.3-9 9.5-9s9.5 3.5 9.5 9"/>'),
   /** OsuIcon.Beatmap (browse → import) */
   browse: svg('<path d="M12 23.5V7.5l13-3v16"/><circle cx="8.5" cy="23.5" r="3.5"/><circle cx="21.5" cy="20.5" r="3.5"/>'),
+  /** OsuIcon.EditCircle (the "edit" slot, used for the chart generator) */
+  edit: svg('<path d="M20.5 6.5l5 5L12 25H7v-5z"/><path d="M17.5 9.5l5 5"/>'),
   /** FontAwesome.Solid.Lightbulb */
   lightbulb: svg('<path d="M11.5 21.5c0-3-4-5-4-10a8.5 8.5 0 0 1 17 0c0 5-4 7-4 10z"/><path d="M12.5 25.5h7M14 29h4"/>'),
   /** FontAwesome.Solid.Redo */

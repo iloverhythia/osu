@@ -340,8 +340,8 @@ export class Game {
       this.back();
       return;
     }
-    // Navigation and function keys (F1 mods, F2 random…) still work while the search box has focus.
-    if (typing && e.code !== 'Enter' && e.code !== 'ArrowUp' && e.code !== 'ArrowDown' && !/^F\d+$/.test(e.code)) return;
+    // Navigation, function keys (F1 mods, F2 random…) and the Ctrl+O / Ctrl+G shortcuts still work while the search box has focus.
+    if (typing && e.code !== 'Enter' && e.code !== 'ArrowUp' && e.code !== 'ArrowDown' && !/^F\d+$/.test(e.code) && !((e.ctrlKey || e.metaKey) && /^Key[GO]$/.test(e.code))) return;
     if (this.currentScreen?.onKeyDown(e)) e.preventDefault();
   }
 

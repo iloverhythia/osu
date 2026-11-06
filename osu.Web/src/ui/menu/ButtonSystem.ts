@@ -312,6 +312,7 @@ export class ButtonSystem {
   onSolo: (() => void) | null = null;
   onSettings: (() => void) | null = null;
   onBeatmapListing: (() => void) | null = null;
+  onEdit: (() => void) | null = null;
 
   constructor(
     private readonly game: Game,
@@ -374,6 +375,14 @@ export class ButtonSystem {
         },
         keys: ['KeyP', 'KeyM', 'KeyL'],
         padLeft: WEDGE_WIDTH,
+      }),
+      new MainMenuButton(game, {
+        text: 'generate',
+        sampleName: 'menu-click',
+        icon: 'edit',
+        colour: 'rgb(238,170,0)',
+        action: () => this.onEdit?.(),
+        keys: ['KeyE', 'KeyG'],
       }),
       new MainMenuButton(game, {
         text: 'browse',

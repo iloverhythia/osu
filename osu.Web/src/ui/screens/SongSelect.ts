@@ -16,6 +16,7 @@ import { h } from '../dom';
 import type { Game } from '../Game';
 import { openModSelect } from '../overlays/ModSelect';
 import { openSettings } from '../overlays/Settings';
+import { openChartGenerator } from '../overlays/ChartGenerator';
 import { Screen } from '../Screen';
 import { confirmDialog } from '../confirm';
 import { PlayerScreen } from './Player';
@@ -196,6 +197,7 @@ export class SongSelectScreen extends Screen {
       h('button', { class: 'ss-toolbar-button', title: 'Settings (Ctrl+O)', onclick: () => openSettings(this.game) }, '⚙'),
       h('button', { class: 'ss-toolbar-button', onclick: () => this.game.openFilePicker() }, 'Import .osz'),
       h('button', { class: 'ss-toolbar-button', title: 'Import a folder (for example an osu!stable Songs folder)', onclick: () => this.game.openFolderPicker() }, 'Import folder'),
+      h('button', { class: 'ss-toolbar-button ss-toolbar-generate', title: 'Generate a beatmap for any mode from a song (Ctrl+G)', onclick: () => this.openGenerator() }, '✦ Generate chart'),
       h('div', { class: 'ss-toolbar-spacer' }),
       this.rulesetTabs,
     );
@@ -563,6 +565,15 @@ export class SongSelectScreen extends Screen {
     this.game.select(src.set, src.entry);
     if (!this.game.working) return;
     this.onStart();
+  }
+
+  /** Starts gameplay on the current selection (used after generating a chart from the main menu). */
+  startSelected(): void {
+    if (this.game.currentScreen === this) this.onStart();
+  }
+
+  openGenerator(): void {
+    openChartGenerator(this.game, { onPlay: () => this.onStart() });
   }
 
   /** SoloSongSelect.OnStart */
@@ -970,6 +981,10 @@ export class SongSelectScreen extends Screen {
           return true;
         }
         return false;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyG') {
+      this.openGenerator();
+      return true;
     }
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyO') {
       openSettings(this.game);
