@@ -704,7 +704,8 @@ export class PlayerScreen extends Screen {
     if (this.failed) {
       // Fail animation: slow the track down like FailAnimation.
       const t = Math.min(1, (now - this.failAnimationStart) / 1500);
-      this.track.rate = Math.max(0.05, this.mods.rate * (1 - t));
+      // Browsers only support playback rates down to 0.0625.
+      this.track.rate = Math.max(0.1, this.mods.rate * (1 - t));
       this.track.element.volume = Math.max(0, 1 - t);
       if (t >= 1) this.track.stop();
     }

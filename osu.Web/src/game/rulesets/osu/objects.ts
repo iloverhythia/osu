@@ -125,6 +125,8 @@ export abstract class OsuHitObject {
   applyDefaults(controlPoints: ControlPointInfo, difficulty: BeatmapDifficulty): void {
     this.applyDefaultsToSelf(controlPoints, difficulty);
     this.createNestedHitObjects();
+    // HitObject.ApplyDefaults sorts nested objects by start time.
+    this.nested.sort((a, b) => a.startTime - b.startTime);
     for (const n of this.nested) n.applyDefaults(controlPoints, difficulty);
   }
 
