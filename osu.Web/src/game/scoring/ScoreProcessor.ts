@@ -87,6 +87,11 @@ export class ScoreProcessor {
     this.updateScore();
   }
 
+  /** ScoreProcessor.MaximumAccuracy: the best accuracy still achievable. */
+  get maximumAchievableAccuracy(): number {
+    return this.maximumBaseScore > 0 ? (this.currentBaseScore + (this.maximumBaseScore - this.currentMaximumBaseScore)) / this.maximumBaseScore : 1;
+  }
+
   get maximumCombo(): number {
     let c = 0;
     for (const [r, n] of this.maximumStatistics) if (increasesCombo(r)) c += n;

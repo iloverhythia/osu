@@ -97,6 +97,7 @@ export class ResultsScreen extends Screen {
         maxCombo: r.maxCombo,
         rank: r.rank,
         mods: r.mods.list,
+        modSettings: r.mods.settings,
         statistics: Object.fromEntries([...r.statistics].map(([k, v]) => [HitResult[k], v])),
         date: r.date,
         pp: computePp(r),
@@ -142,7 +143,7 @@ export class ResultsScreen extends Screen {
         h('div', { class: 'ss-title' }, e.title),
         h('div', { class: 'ss-artist' }, `${e.artist} · [${e.difficultyName}] · ${r.ruleset.name}`),
         h('div', { class: 'results-score' }, formatNumber(r.totalScore)),
-        r.mods.isEmpty ? null : h('div', { class: 'mod-pills' }, r.mods.list.map(m => h('span', { class: 'mod-pill', style: { background: '#ffcc22' } }, m))),
+        r.mods.isEmpty ? null : h('div', { class: 'mod-pills' }, r.mods.list.map(m => h('span', { class: 'mod-pill', style: { background: '#ffcc22' } }, r.mods.label(m)))),
         h(
           'div',
           { class: 'results-stats' },

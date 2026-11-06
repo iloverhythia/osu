@@ -2,7 +2,7 @@
 // Song select (port of the essentials of SongSelect / BeatmapCarousel / BeatmapInfoWedge / BeatmapLeaderboard).
 
 import { settings } from '../../framework/Settings';
-import { applyCommonDifficultyMods } from '../../game/mods/Mods';
+import { ModSet, applyCommonDifficultyMods, applyDifficultyAdjust } from '../../game/mods/Mods';
 import { availableRulesets } from '../../game/rulesets';
 import type { Ruleset } from '../../game/rulesets/Ruleset';
 import { RANK_COLOURS, RANK_DISPLAY, type ScoreRank } from '../../game/scoring/ScoreRank';
@@ -236,7 +236,7 @@ export class SongSelectScreen extends Screen {
     clear(this.modPills);
     for (const m of this.game.mods.list) {
       const def = MOD_BY_ACRONYM.get(m);
-      this.modPills.appendChild(h('span', { class: 'mod-pill', style: { background: def ? MOD_TYPE_COLOURS[def.type] : '#fff' } }, m));
+      this.modPills.appendChild(h('span', { class: 'mod-pill', style: { background: def ? MOD_TYPE_COLOURS[def.type] : '#fff' } }, this.game.mods.label(m)));
     }
   }
 
@@ -333,7 +333,7 @@ export class SongSelectScreen extends Screen {
       overallDifficulty: e.overallDifficulty,
       drainRate: e.drainRate,
     });
-    const adjusted = applyCommonDifficultyMods(base, mods, r.id !== 3 && r.id !== 1);
+    const adjusted = applyCommonDifficultyMods(applyDifficultyAdjust({ difficulty: base }, mods).difficulty, mods, r.id !== 3 && r.id !== 1);
     const rate = mods.rate;
     const key = this.starKey(e);
     const stars = this.starCache.get(key) ?? (mods.isEmpty && e.rulesetId === r.id ? e.stars : undefined);
@@ -400,7 +400,8 @@ export class SongSelectScreen extends Screen {
         if (!working || working.entry.hash !== e.hash) return;
         const beatmap = await working.getBeatmap();
         if (!r.canConvert(beatmap)) return;
-        const value = r.starRating!(r.createPlayable(beatmap, mods.forRuleset(r.shortName, r.availableMods)));
+        const rulesetMods = mods.forRuleset(r.shortName, r.availableMods);
+        const value = r.starRating!(r.createPlayable(applyDifficultyAdjust(beatmap, rulesetMods), rulesetMods));
         this.starCache.set(key, value);
         if (mods.isEmpty && e.rulesetId === r.id && e.stars === undefined) e.stars = value;
         if (job === this.starJob) {
@@ -435,8 +436,7 @@ export class SongSelectScreen extends Screen {
         const replay = await Database.getReplay(s.id);
         const w = this.game.working;
         if (!replay || !w) return;
-        const { ModSet } = await import('../../game/mods/Mods');
-        this.game.push(new PlayerScreen(this.game, w, this.game.ruleset, new ModSet(s.mods), replay));
+        this.game.push(new PlayerScreen(this.game, w, this.game.ruleset, new ModSet(s.mods, s.modSettings ?? replay.modSettings ?? {}), replay));
       };
       wrap.appendChild(
         h(
@@ -447,7 +447,7 @@ export class SongSelectScreen extends Screen {
             'div',
             null,
             h('div', null, h('b', null, formatNumber(s.totalScore)), ` · ${(s.accuracy * 100).toFixed(2)}% · ${s.maxCombo}x`),
-            h('div', { class: 'sub' }, `${s.player} · ${new Date(s.date).toLocaleDateString()}${s.mods.length ? ` · ${s.mods.join('')}` : ''}`),
+            h('div', { class: 'sub' }, `${s.player} · ${new Date(s.date).toLocaleDateString()}${s.mods.length ? ` · ${s.mods.map(m => new ModSet(s.mods, s.modSettings ?? {}).label(m)).join(' ')}` : ''}`),
           ),
           h('div', { style: { color: 'var(--fg-dim)', fontWeight: '700', textAlign: 'right' } }, s.pp ? `${Math.round(s.pp)}pp` : '', s.hasReplay ? h('div', { class: 'sub' }, '▶ replay') : null),
         ),

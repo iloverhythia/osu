@@ -14,7 +14,7 @@ export const osuRuleset: Ruleset = {
   id: 0,
   shortName: 'osu',
   name: 'osu!',
-  availableMods: ['EZ', 'NF', 'HT', 'DC', 'HR', 'SD', 'PF', 'DT', 'NC', 'HD', 'FL', 'MR', 'AT', 'CN', 'RX', 'AP', 'SO'],
+  availableMods: ['EZ', 'NF', 'HT', 'DC', 'HR', 'SD', 'PF', 'DT', 'NC', 'HD', 'FL', 'AC', 'DA', 'MR', 'AT', 'CN', 'RX', 'AP', 'SO'],
 
   actions: () => [
     { id: 'LeftButton', label: 'Left button' },

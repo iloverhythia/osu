@@ -8,7 +8,7 @@ import { settings } from '../../framework/Settings';
 import { HitSampleInfo } from '../../game/audio/HitSampleInfo';
 import type { Beatmap } from '../../game/beatmaps/Beatmap';
 import type { WorkingBeatmap } from '../../game/beatmaps/WorkingBeatmap';
-import type { ModSet } from '../../game/mods/Mods';
+import { applyDifficultyAdjust, type ModSet } from '../../game/mods/Mods';
 import type { HealthProcessor } from '../../game/scoring/HealthProcessor';
 import { HitResult, affectsAccuracy, affectsCombo, breaksCombo, isBasic, isHit } from '../../game/scoring/HitResult';
 import type { HitWindows } from '../../game/scoring/HitWindows';
@@ -129,7 +129,7 @@ export class PlayerScreen extends Screen {
     this.beatmap = await this.working.getBeatmap();
     if (!this.ruleset.canConvert(this.beatmap)) throw new Error(`This beatmap can't be played in ${this.ruleset.name}`);
 
-    this.playable = this.ruleset.createPlayable(this.beatmap, this.mods);
+    this.playable = this.ruleset.createPlayable(applyDifficultyAdjust(this.beatmap, this.mods), this.mods);
     if (this.playable.objectTimes.length === 0) throw new Error('Beatmap has no hit objects');
 
     const track = this.working.createTrack(this.audio);
@@ -218,6 +218,13 @@ export class PlayerScreen extends Screen {
     if (this.mods.has('PF') && this.ruleset.shortName !== 'mania')
       hp.failConditions.push(r => (relevant(r.judgement.minResult) || relevant(r.judgement.maxResult) || relevant(r.type)) && r.type !== r.judgement.maxResult);
     hp.onFail = () => this.onFail();
+    // ModAccuracyChallenge (AccuracyMode.MaximumAchievable, the default): fail once the minimum can no longer be reached.
+    if (this.mods.has('AC')) {
+      const minimum = this.mods.setting<number>('AC', 'minimumAccuracy');
+      this.scoreProcessor.onChange.push(() => {
+        if (this.scoreProcessor.maximumAchievableAccuracy < minimum) hp.triggerFailure();
+      });
+    }
 
     // Hit windows for the hit error meter.
     const withWindows = (p.hitObjects as { hitWindows?: HitWindows | null }[]).find(o => o && o.hitWindows && typeof o.hitWindows.getAllAvailableWindows === 'function');
@@ -674,7 +681,7 @@ export class PlayerScreen extends Screen {
       date: Date.now(),
       passed: !this.failed,
       replay: this.recorder
-        ? { rulesetId: this.ruleset.id, space: this.replaySpace, events: this.recorder.events, player: settings.get('ui.username', 'Guest'), mods: this.mods.list }
+        ? { rulesetId: this.ruleset.id, space: this.replaySpace, events: this.recorder.events, player: settings.get('ui.username', 'Guest'), mods: this.mods.list, modSettings: this.mods.settings }
         : this.replay,
       isReplay: this.replay != null,
     };
@@ -836,7 +843,7 @@ export class PlayerScreen extends Screen {
       g.textAlign = 'right';
       g.textBaseline = 'top';
       g.fillStyle = 'rgba(255,255,255,0.7)';
-      g.fillText(this.mods.list.join(' '), w - 16, 12 + 74 * ui);
+      g.fillText(this.mods.list.map(m => this.mods.label(m)).join(' '), w - 16, 12 + 74 * ui);
     }
 
     // Song progress (bottom bar).

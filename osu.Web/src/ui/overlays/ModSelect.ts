@@ -1,7 +1,7 @@
 // Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
 // Mod select overlay (ModSelectOverlay essentials).
 
-import { MODS, MOD_TYPE_COLOURS, ModDef, ModType } from '../../game/mods/Mods';
+import { MODS, MOD_SETTINGS, MOD_TYPE_COLOURS, ModDef, ModType } from '../../game/mods/Mods';
 import { clear, h } from '../dom';
 import type { Game } from '../Game';
 
@@ -32,6 +32,57 @@ export function openModSelect(game: Game): void {
   const available = MODS.filter(m => r.availableMods.includes(m.acronym) && (!m.rulesets || m.rulesets.includes(r.shortName)));
   const multiplier = h('span', { style: { fontWeight: '800', color: 'var(--yellow)' } });
   const columns = h('div', { class: 'mod-columns' });
+  const customise = h('div', { class: 'mod-customise' });
+
+  /** ModSettingsArea: controls for each selected mod's [SettingSource] settings. */
+  const renderSettings = () => {
+    clear(customise);
+    for (const acr of game.mods.list) {
+      const defs = (MOD_SETTINGS[acr] ?? []).filter(d => !d.rulesets || d.rulesets.includes(r.shortName));
+      if (defs.length === 0) continue;
+      const def = MODS.find(m => m.acronym === acr)!;
+      const block = h('div', { class: 'panel', style: { padding: '12px 14px', marginTop: '12px' } }, h('div', { style: { fontWeight: '800', marginBottom: '6px', color: MOD_TYPE_COLOURS[def.type] } }, def.name));
+      for (const d of defs) {
+        const current = game.mods.setting<number | boolean | null>(acr, d.key);
+        const row = h('div', { class: 'setting' }, h('label', null, d.label));
+        if (d.kind === 'boolean') {
+          const input = h('input', { type: 'checkbox', class: 'toggle' });
+          input.checked = !!current;
+          input.addEventListener('change', () => {
+            game.setMods(game.mods.withSetting(acr, d.key, input.checked));
+            multiplier.textContent = `${game.ruleset.scoreMultiplier(game.mods).toFixed(2)}x`;
+          });
+          row.appendChild(input);
+        } else {
+          const isDifficulty = d.kind === 'difficulty';
+          const value = h('span', { class: 'value' });
+          const slider = h('input', { type: 'range', min: d.min, max: d.max, step: d.step });
+          const override = isDifficulty ? h('input', { type: 'checkbox', class: 'toggle', title: "Override the beatmap's value" }) : null;
+          const sync = () => {
+            const v = game.mods.setting<number | null>(acr, d.key);
+            const shown = v ?? (isDifficulty ? 5 : (d.default as number));
+            slider.value = String(shown);
+            slider.disabled = isDifficulty && v == null;
+            if (override) override.checked = v != null;
+            value.textContent = v == null && isDifficulty ? 'map' : d.key === 'speed' ? `${shown.toFixed(2)}x` : d.key === 'minimumAccuracy' ? `${(shown * 100).toFixed(1)}%` : shown.toFixed(1);
+          };
+          slider.addEventListener('input', () => {
+            game.setMods(game.mods.withSetting(acr, d.key, parseFloat(slider.value)));
+            sync();
+            multiplier.textContent = `${game.ruleset.scoreMultiplier(game.mods).toFixed(2)}x`;
+          });
+          override?.addEventListener('change', () => {
+            game.setMods(game.mods.withSetting(acr, d.key, override.checked ? parseFloat(slider.value) : null));
+            sync();
+          });
+          sync();
+          row.appendChild(h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center' } }, override, slider, value));
+        }
+        block.appendChild(row);
+      }
+      customise.appendChild(block);
+    }
+  };
 
   const toggle = (m: ModDef) => {
     game.setMods(game.mods.toggle(m.acronym));
@@ -63,6 +114,7 @@ export function openModSelect(game: Game): void {
       );
     }
     multiplier.textContent = `${game.ruleset.scoreMultiplier(game.mods).toFixed(2)}x`;
+    renderSettings();
   };
   render();
 
@@ -100,6 +152,7 @@ export function openModSelect(game: Game): void {
         ),
       ),
       columns,
+      customise,
     ),
   );
   game.openOverlay(el, {

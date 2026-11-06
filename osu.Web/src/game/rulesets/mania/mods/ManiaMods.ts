@@ -10,7 +10,7 @@ import { f32 } from '../utils';
 import { DotNetRandom } from './DotNetRandom';
 
 export const MANIA_MODS: readonly string[] = [
-  'EZ', 'NF', 'HT', 'DC', 'HR', 'SD', 'PF', 'DT', 'NC', 'FI', 'HD', 'FL', 'AC',
+  'EZ', 'NF', 'HT', 'DC', 'HR', 'SD', 'PF', 'DT', 'NC', 'FI', 'HD', 'FL', 'AC', 'DA',
   'RD', 'MR', '1K', '2K', '3K', '4K', '5K', '6K', '7K', '8K', '9K', '10K', 'AT', 'CN',
 ];
 
@@ -93,8 +93,8 @@ export function maniaScoreMultiplier(mods: ModSet): number {
   let result = 1;
   if (mods.has('EZ')) result *= 0.5;
   if (mods.has('NF')) result *= 0.5;
-  if (mods.has('HT')) result *= rateAdjustMultiplier(0.75);
-  if (mods.has('DC')) result *= rateAdjustMultiplier(0.75);
+  if (mods.has('HT') || mods.has('DC')) result *= rateAdjustMultiplier(mods.rate);
+  if (mods.has('DA')) result *= 0.5;
   if (keyModCount(mods) != null) result *= 0.9;
   return result;
 }

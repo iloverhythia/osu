@@ -50,6 +50,7 @@ export interface ScoreRecord {
   maxCombo: number;
   rank: string;
   mods: string[];
+  modSettings?: import('../mods/Mods').ModSettings;
   statistics: Record<string, number>;
   date: number;
   pp?: number;

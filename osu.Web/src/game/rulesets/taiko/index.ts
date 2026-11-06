@@ -14,7 +14,7 @@ export const taikoRuleset: Ruleset = {
   id: 1,
   shortName: 'taiko',
   name: 'osu!taiko',
-  availableMods: ['EZ', 'NF', 'HT', 'DC', 'HR', 'SD', 'PF', 'DT', 'NC', 'HD', 'FL', 'RD', 'AT', 'CN', 'RX'],
+  availableMods: ['EZ', 'NF', 'HT', 'DC', 'HR', 'SD', 'PF', 'DT', 'NC', 'HD', 'FL', 'AC', 'DA', 'RD', 'AT', 'CN', 'RX'],
 
   actions: () => [
     { id: 'LeftRim', label: 'Left (rim)' },

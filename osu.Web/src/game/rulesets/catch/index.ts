@@ -29,7 +29,7 @@ export const catchRuleset: Ruleset = {
   shortName: 'fruits',
   name: 'osu!catch',
 
-  availableMods: ['EZ', 'NF', 'HT', 'DC', 'HR', 'SD', 'PF', 'DT', 'NC', 'HD', 'FL', 'AC', 'MR', 'AT', 'CN', 'RX'],
+  availableMods: ['EZ', 'NF', 'HT', 'DC', 'HR', 'SD', 'PF', 'DT', 'NC', 'HD', 'FL', 'AC', 'DA', 'MR', 'AT', 'CN', 'RX'],
 
   actions(): RulesetAction[] {
     return ACTIONS;

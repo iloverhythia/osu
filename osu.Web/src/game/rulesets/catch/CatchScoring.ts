@@ -249,9 +249,9 @@ export function catchScoreMultiplier(mods: ModSet): number {
   let result = 1;
   if (mods.has('EZ')) result *= 0.5;
   if (mods.has('NF')) result *= 0.5;
-  if (mods.has('HT') || mods.has('DC')) result *= rateAdjustMultiplier(0.75);
+  if (mods.has('HT') || mods.has('DC')) result *= rateAdjustMultiplier(mods.rate);
   if (mods.has('HR')) result *= 1.12;
-  if (mods.has('DT') || mods.has('NC')) result *= rateAdjustMultiplier(1.5);
+  if (mods.has('DT') || mods.has('NC')) result *= rateAdjustMultiplier(mods.rate);
   if (mods.has('HD')) result *= 1.06;
   if (mods.has('FL')) result *= 1.12;
   if (mods.has('DA')) result *= 0.5;

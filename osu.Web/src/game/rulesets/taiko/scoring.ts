@@ -132,11 +132,9 @@ export function taikoScoreMultiplier(mods: ModSet): number {
   let m = 1;
   if (mods.has('EZ')) m *= 0.5;
   if (mods.has('NF')) m *= 0.5;
-  if (mods.has('HT')) m *= rateAdjustMultiplier(0.75);
-  if (mods.has('DC')) m *= rateAdjustMultiplier(0.75);
+  if (mods.has('HT') || mods.has('DC')) m *= rateAdjustMultiplier(mods.rate);
   if (mods.has('HR')) m *= 1.06;
-  if (mods.has('DT')) m *= rateAdjustMultiplier(1.5);
-  if (mods.has('NC')) m *= rateAdjustMultiplier(1.5);
+  if (mods.has('DT') || mods.has('NC')) m *= rateAdjustMultiplier(mods.rate);
   if (mods.has('HD')) m *= 1.06;
   if (mods.has('FL')) m *= 1.12;
   if (mods.has('DA')) m *= 0.5;

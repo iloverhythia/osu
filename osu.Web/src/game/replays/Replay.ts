@@ -17,6 +17,8 @@ export interface Replay {
   events: ReplayEvent[];
   player: string;
   mods: string[];
+  /** Customised mod settings (rates, Difficulty Adjust values). */
+  modSettings?: import('../mods/Mods').ModSettings;
 }
 
 export class ReplayRecorder {
