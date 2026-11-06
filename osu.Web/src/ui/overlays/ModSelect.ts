@@ -7,12 +7,14 @@
 
 import '../select/select.css';
 import { settings } from '../../framework/Settings';
-import { MOD_SETTINGS, MODS, ModDef, ModType } from '../../game/mods/Mods';
+import { MOD_SETTINGS, MODS, ModDef, ModSet, ModType } from '../../game/mods/Mods';
+import { ModPresets, type ModPreset } from '../../game/mods/ModPresets';
 import { clear, h } from '../dom';
+import { confirmDialog } from '../confirm';
 import type { Game } from '../Game';
 import { cssEasing, Easing, tween } from '../select/Anim';
 import { css, darken, forModType, lighten, OsuColour, OverlayColourProvider, OverlayColourScheme, RGBA } from '../select/Colours';
-import { StarRatingDisplay } from '../select/Components';
+import { showContextMenu, StarRatingDisplay } from '../select/Components';
 import { difficultyCache } from '../select/DifficultyCache';
 import { format0dd, getBeatmapAttributesForDisplay } from '../select/DisplayAttributes';
 import type { ScreenFooter, ScreenFooterButton } from '../select/Footer';
@@ -136,6 +138,7 @@ class ModSelectOverlay {
 
     // Columns
     this.columnFlow = h('div', { class: 'mso-columns' });
+    this.columnFlow.appendChild(this.createPresetColumn());
     for (const col of COLUMNS) {
       const mods = this.available.filter(m => m.type === col.type);
       const accent = forModType(col.type);
@@ -226,6 +229,164 @@ class ModSelectOverlay {
   }
 
   // ------------------------------------------------------------------ panels
+
+  // ------------------------------------------------------------------ presets (ModPresetColumn / ModPresetPanel)
+
+  private presetItems!: HTMLDivElement;
+  private presetPanels: { preset: ModPreset; el: HTMLDivElement; sw: HTMLDivElement; main: HTMLDivElement; bg: HTMLDivElement; text: HTMLDivElement; textBg: HTMLDivElement; hovered: boolean }[] = [];
+  private addPresetButton!: HTMLButtonElement;
+
+  private createPresetColumn(): HTMLElement {
+    const accent = OsuColour.Orange1;
+    const c = this.colours;
+    this.presetItems = h('div', { class: 'mso-col-items scroll-thin' });
+    this.addPresetButton = h('button', { class: 'mso-add-preset', title: 'Add preset', onclick: (e: MouseEvent) => this.showPresetPopover(e.currentTarget as HTMLElement, null) }, '+') as HTMLButtonElement;
+    const top = h(
+      'div',
+      { class: 'mso-col-top' },
+      h('div', { class: 'mso-col-header', style: { background: css(accent) } }, h('div', { class: 'mso-col-tri', style: { background: `linear-gradient(${css(darken(accent, 0.1))}, ${css(accent)})` } }), h('div', { class: 'mso-col-header-text' }, h('b', null, 'Presets'))),
+      h('div', { class: 'mso-col-content', style: { background: css(c.background4), borderColor: css(c.background3) } }, this.presetItems),
+    );
+    const el = h('div', { class: 'mso-column mso-preset-column' }, top);
+    el.style.width = `${COLUMN_WIDTH}px`;
+    this.unsubscribePresets = settings.subscribe(k => {
+      if (k.startsWith('modPresets.')) this.renderPresets();
+    });
+    this.renderPresets();
+    return el;
+  }
+
+  private unsubscribePresets: (() => void) | null = null;
+
+  private renderPresets(): void {
+    const r = this.game.ruleset.shortName;
+    this.presetPanels = ModPresets.forRuleset(r).map((preset, i) => {
+      const sw = h('div', { class: 'mso-switch' }, h('div', { class: 'mso-switch-icon mso-preset-index' }, i < 10 ? h('span', null, String((i + 1) % 10)) : null));
+      const textBg = h('div', { class: 'mso-panel-textbg' });
+      const text = h('div', { class: 'mso-panel-text' }, h('div', { class: 'mso-panel-title' }, preset.name), h('div', { class: 'mso-panel-desc' }, preset.description));
+      const main = h('div', { class: 'mso-panel-main' }, h('div', { class: 'mso-panel-inner' }, textBg, text));
+      const bg = h('div', { class: 'mso-panel-bg' });
+      const el = h('div', { class: 'mso-panel mso-preset-panel', title: `${preset.name}\n${preset.mods.join(', ')}` }, bg, sw, main);
+      const p = { preset, el, sw, main, bg, text, textBg, hovered: false };
+      el.addEventListener('mouseenter', () => ((p.hovered = true), this.updatePresets()));
+      el.addEventListener('mouseleave', () => ((p.hovered = false), this.updatePresets()));
+      el.addEventListener('click', e => {
+        e.stopPropagation();
+        this.togglePreset(preset);
+      });
+      el.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        showContextMenu(e.clientX, e.clientY, [
+          { text: 'Edit', type: 'highlighted', action: () => this.showPresetPopover(el, preset) },
+          {
+            text: 'Delete',
+            type: 'destructive',
+            action: async () => {
+              if (await confirmDialog(this.game, `Are you sure you want to delete this mod preset? ${preset.name}`, 'Yes. Go for it.')) ModPresets.delete(r, preset.id);
+            },
+          },
+        ]);
+      });
+      return p;
+    });
+    this.presetItems.replaceChildren(...this.presetPanels.map(p => p.el), this.addPresetButton);
+    this.updatePresets();
+  }
+
+  /** ModPresetPanel.updateActiveState: the preset's mods equal the selection (ignoring system mods). */
+  private presetActive(preset: ModPreset): boolean {
+    const sel = this.game.mods;
+    if (sel.list.length !== preset.mods.length || !preset.mods.every(m => sel.has(m))) return false;
+    return preset.mods.every(m => JSON.stringify(sel.settings[m] ?? {}) === JSON.stringify(preset.settings[m] ?? {}));
+  }
+
+  private togglePreset(preset: ModPreset): void {
+    if (this.presetActive(preset)) this.game.setMods(new ModSet(this.game.mods.list.filter(m => !preset.mods.includes(m)), this.game.mods.settings));
+    else this.game.setMods(new ModSet(preset.mods, preset.settings));
+    this.game.playUiSample('menu-click', 0.4);
+  }
+
+  private updatePresets(): void {
+    if (!this.presetItems) return;
+    const accent = OsuColour.Orange1;
+    const c = this.colours;
+    for (const p of this.presetPanels) {
+      const active = this.presetActive(p.preset);
+      let background: RGBA = active ? darken(accent, 0.3) : c.background3;
+      let foreground: RGBA = active ? accent : c.background2;
+      if (p.hovered) {
+        background = lighten(background, 0.1);
+        foreground = lighten(foreground, 0.1);
+      }
+      // ModPresetPanel: IdleSwitchWidth 24, ExpandedSwitchWidth 40.
+      const w = active ? 40 : 24;
+      p.bg.style.background = css(background);
+      p.el.style.background = `linear-gradient(${css(background)}, ${css(foreground)})`;
+      p.sw.style.width = `${w}px`;
+      p.main.style.left = `${w}px`;
+      p.textBg.style.background = css(foreground);
+      p.text.style.color = active ? css(c.background6) : '#fff';
+      const idx = p.sw.firstElementChild as HTMLElement;
+      idx.style.background = 'transparent';
+      idx.style.color = active ? css(c.background6) : css(accent);
+      idx.style.opacity = active ? '1' : '0.4';
+    }
+    // AddPresetButton: enabled when non-system mods are selected.
+    this.addPresetButton.disabled = this.game.mods.isEmpty;
+  }
+
+  /** AddPresetPopover / EditPresetPopover. */
+  private showPresetPopover(anchor: HTMLElement, preset: ModPreset | null): void {
+    this.root.querySelector('.mso-preset-popover')?.remove();
+    const r = this.game.ruleset.shortName;
+    const name = h('input', { class: 'mso-pp-input', type: 'text', value: preset?.name ?? '', maxLength: 64 }) as HTMLInputElement;
+    const description = h('input', { class: 'mso-pp-input', type: 'text', value: preset?.description ?? '', maxLength: 200 }) as HTMLInputElement;
+    const useCurrent = preset ? (h('input', { type: 'checkbox' }) as HTMLInputElement) : null;
+    const submit = h('button', { class: 'mso-pp-submit' }, preset ? 'Save' : 'Add preset') as HTMLButtonElement;
+    const pop = h(
+      'div',
+      { class: 'mso-preset-popover', onclick: (e: MouseEvent) => e.stopPropagation() },
+      h('label', null, 'Name', name),
+      h('label', null, 'Description', description),
+      useCurrent ? h('label', { class: 'mso-pp-check' }, useCurrent, 'Use current mods') : null,
+      submit,
+    );
+    const close = () => {
+      pop.remove();
+      document.removeEventListener('pointerdown', outside, true);
+    };
+    const outside = (e: PointerEvent) => {
+      if (!pop.contains(e.target as Node)) close();
+    };
+    const save = () => {
+      const n = name.value.trim();
+      if (!n) {
+        name.focus();
+        return;
+      }
+      const mods = this.game.mods;
+      if (preset) ModPresets.update(r, preset.id, { name: n, description: description.value.trim(), ...(useCurrent?.checked ? { mods: mods.list, settings: mods.settings } : {}) });
+      else ModPresets.add(r, { name: n, description: description.value.trim(), mods: mods.list, settings: mods.settings });
+      close();
+    };
+    const updateSubmit = () => (submit.disabled = name.value.trim().length === 0);
+    name.addEventListener('input', updateSubmit);
+    for (const i of [name, description])
+      i.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') close();
+      });
+    submit.addEventListener('click', save);
+    updateSubmit();
+    this.root.appendChild(pop);
+    const a = anchor.getBoundingClientRect();
+    pop.style.left = `${Math.min(innerWidth - 320, a.right + 8)}px`;
+    pop.style.top = `${Math.max(8, Math.min(innerHeight - 220, a.top))}px`;
+    setTimeout(() => document.addEventListener('pointerdown', outside, true), 0);
+    name.focus();
+  }
 
   private createPanel(def: ModDef): PanelState {
     const c = this.colours;
@@ -442,6 +603,7 @@ class ModSelectOverlay {
   private updateFromSelection(): void {
     if (this.closed) return;
     for (const p of this.panels) this.updatePanel(p);
+    this.updatePresets();
     this.updateCustomisation();
     this.updateInformation();
     this.deselectAll.disabled = this.game.mods.isEmpty;
@@ -538,6 +700,14 @@ class ModSelectOverlay {
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (e.repeat) return true;
+    // ModPresetColumn: number keys 1-9, 0 toggle the first ten presets.
+    const digit = /^Digit(\d)$/.exec(e.code);
+    if (digit) {
+      const index = (Number(digit[1]) + 9) % 10;
+      const p = this.presetPanels[index];
+      if (p) this.togglePreset(p.preset);
+      return true;
+    }
     // ClassicModHotkeyHandler (ModSelectHotkeyStyle.Classic): stable's fixed keys, cycling through related mods.
     if (settings.get<string>('ui.modSelectHotkeyStyle', 'sequential') === 'classic') {
       const types = CLASSIC_HOTKEYS[e.code];
@@ -615,6 +785,7 @@ class ModSelectOverlay {
     this.closed = true;
     openInstance = null;
     this.unsubscribe();
+    this.unsubscribePresets?.();
     this.starsUnsub?.();
     clearTimeout(this.selectionTimer);
     for (const op of this.pendingSelections) op();

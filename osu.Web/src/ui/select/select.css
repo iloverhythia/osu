@@ -2774,3 +2774,98 @@
 .ss-context-menu .cm-check.on {
   background: currentColor;
 }
+
+/* ModPresetColumn: AddPresetButton + popovers */
+/* The add button follows the presets inside the same scrolling flow. */
+.mso-preset-column .mso-col-items {
+  position: absolute;
+}
+
+.mso-add-preset {
+  flex: none;
+  height: 42px;
+  width: 100%;
+  border: 0;
+  border-radius: 7px;
+  background: var(--c-background3, #333);
+  color: #fff;
+  font-size: 22px;
+  font-weight: 700;
+  cursor: pointer;
+  transform: skewX(-11.3099deg);
+}
+
+.mso-add-preset:hover:not(:disabled) {
+  filter: brightness(1.2);
+}
+
+.mso-add-preset:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.mso-preset-index {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.mso-preset-popover {
+  position: fixed;
+  z-index: 200;
+  width: 300px;
+  padding: 14px;
+  border-radius: 10px;
+  background: var(--c-background5, #222);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: #fff;
+  font-family: var(--font);
+}
+
+.mso-preset-popover label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--c-content2, #ccc);
+}
+
+.mso-preset-popover .mso-pp-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.mso-pp-input {
+  height: 34px;
+  padding: 0 10px;
+  border: 2px solid transparent;
+  border-radius: 5px;
+  background: var(--c-background3, #333);
+  color: #fff;
+  font: 400 15px var(--font);
+  outline: none;
+  user-select: text;
+}
+
+.mso-pp-input:focus {
+  border-color: var(--c-highlight1, #fc2);
+}
+
+.mso-pp-submit {
+  height: 36px;
+  margin-top: 4px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--c-colour3, #b04);
+  color: #fff;
+  font: 700 15px var(--font);
+  cursor: pointer;
+}
+
+.mso-pp-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

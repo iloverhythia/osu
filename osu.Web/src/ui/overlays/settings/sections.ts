@@ -11,6 +11,7 @@ import { availableRulesets } from '../../../game/rulesets';
 import { ACTIVE_SKIN_SETTING, deleteSkin, listSkins, SkinStore, type SkinInfo } from '../../../game/skinning';
 import { Database } from '../../../game/storage/Database';
 import { Collections, HiddenBeatmaps } from '../../../game/Collections';
+import { ModPresets } from '../../../game/mods/ModPresets';
 import { confirmDialog } from '../../confirm';
 import { h } from '../../dom';
 import type { Game } from '../../Game';
@@ -534,7 +535,24 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
         ],
       },
       { header: 'Scores', items: [button('Delete ALL scores', () => void deleteAllScores(), { dangerous: true })] },
-      { header: 'Mod presets', items: [button('Delete ALL mod presets', () => {}, { dangerous: true, unavailable: true }), button('Restore all recently deleted mod presets', () => {}, { unavailable: true })] },
+      {
+        header: 'Mod presets',
+        items: [
+          button(
+            'Delete ALL mod presets',
+            async () => {
+              if (!(await confirmDialog(game, 'Are you sure you want to delete all mod presets?', 'Yes. Go for it.'))) return;
+              const n = ModPresets.deleteAll(availableRulesets().map(r => r.shortName));
+              game.toast(`Deleted ${n} mod preset${n === 1 ? '' : 's'}`, 'success');
+            },
+            { dangerous: true },
+          ),
+          button('Restore all recently deleted mod presets', () => {
+            const n = ModPresets.restoreAll(availableRulesets().map(r => r.shortName));
+            game.toast(`Restored ${n} mod preset${n === 1 ? '' : 's'}`, 'success');
+          }),
+        ],
+      },
     ],
   };
 
