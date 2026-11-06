@@ -115,6 +115,11 @@ export interface Ruleset {
   readonly displayedResults: readonly HitResult[];
   /** Short label for a hit result (e.g. "300", "GREAT"). */
   resultLabel(result: HitResult): string;
+  /**
+   * Lazer's autoplay as a generated replay (the ruleset's AutoGenerator). When present, the player plays this replay
+   * through the normal input path instead of setting `ctx.autoplay`, exactly like lazer's ReplayInputHandler.
+   */
+  generateAutoplay?(playable: PlayableBeatmap): import('../replays/Replay').Replay;
   /** Star rating of a playable beatmap (optional; 0 when not implemented). */
   starRating?(playable: PlayableBeatmap): number;
 }

@@ -8,6 +8,7 @@ import { HitResult } from '../../scoring/HitResult';
 import type { DrawableRuleset, GameplayContext, PlayableBeatmap, Ruleset } from '../Ruleset';
 import { OsuPlayableBeatmap, convertOsuBeatmap } from './beatmap';
 import { DrawableOsuRuleset } from './DrawableOsuRuleset';
+import { generateOsuAutoplay } from './OsuAutoGenerator';
 import { calculateOsuDifficulty } from './difficulty';
 import { OsuHealthProcessor, OsuScoreProcessor, osuScoreMultiplier } from './scoring';
 
@@ -41,6 +42,8 @@ export const osuRuleset: Ruleset = {
   scoreMultiplier: (mods: ModSet) => osuScoreMultiplier(mods),
 
   displayedResults: [HitResult.Great, HitResult.Ok, HitResult.Meh, HitResult.Miss, HitResult.LargeTickHit, HitResult.SliderTailHit],
+
+  generateAutoplay: (playable: PlayableBeatmap) => generateOsuAutoplay(playable as OsuPlayableBeatmap, playable.mods.rate),
 
   starRating: (playable: PlayableBeatmap) => calculateOsuDifficulty(playable as OsuPlayableBeatmap).starRating,
 
