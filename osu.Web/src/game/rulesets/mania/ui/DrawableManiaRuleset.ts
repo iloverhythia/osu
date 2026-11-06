@@ -346,6 +346,7 @@ export class DrawableManiaRuleset implements DrawableRuleset {
     const settings = ctx.settings;
     const scrollSpeed = Math.min(40, Math.max(1, Number(settings.get('mania.scrollSpeed', 8)) || 8));
     this.upwards = settings.get<string>('mania.scrollDirection', 'down') === 'up';
+    this.touchOverlay = settings.get<boolean>('mania.touchOverlay', false);
     this.timingBasedColouring = settings.get<boolean>('mania.timingBasedColouring', false);
     // DrawableManiaRuleset.updateTimeRange: TargetTimeRange * tempo * frequency (hit position at the default 110 => scale 1).
     this.timeRange = Math.min(MAX_TIME_RANGE, Math.max(1, computeScrollTime(scrollSpeed) * ctx.rate));
@@ -428,6 +429,8 @@ export class DrawableManiaRuleset implements DrawableRuleset {
 
   onPressed(action: string, time: number): void {
     if (this.autoplay) return;
+    // ManiaTouchInputArea.OnKeyDown: hide whenever the keyboard is used.
+    if (this.touchOverlay && this.touches.size === 0) this.setOverlayVisible(false);
     const column = this.columnForAction(action);
     if (!column) return;
     column.keyboardDown = true;
@@ -442,9 +445,12 @@ export class DrawableManiaRuleset implements DrawableRuleset {
     this.updateColumnDown(column, time);
   }
 
-  onTouchStart(id: number, x: number, _y: number, time: number): void {
+  onTouchStart(id: number, x: number, y: number, time: number): void {
     if (this.autoplay) return;
-    const column = this.columnAtX(x);
+    // ManiaTouchInputArea (TouchOverlay): the bottom half of the screen is split into one receptor per column.
+    const receptor = this.touchOverlay ? this.receptorAt(x, y) : null;
+    if (this.touchOverlay) this.setOverlayVisible(true);
+    const column = receptor ?? this.columnAtX(x);
     if (!column) return;
     this.touches.set(id, column.index);
     column.touchCount++;
@@ -986,6 +992,77 @@ export class DrawableManiaRuleset implements DrawableRuleset {
 
     if (this.ctx.mods.has('FL')) this.drawFlashlight(ctx, l);
 
+    ctx.restore();
+    this.viewSize = { w: width, h: height };
+    if (this.touchOverlay) this.drawTouchOverlay(ctx, width, height);
+  }
+
+  // ------------------------------------------------------------------ ManiaTouchInputArea
+
+  private readonly touchOverlay: boolean = false;
+  private viewSize = { w: 0, h: 0 };
+  private overlay = { visible: false, from: 0, to: 0, start: 0, duration: 0 };
+  private readonly receptorHighlight = new Map<number, { from: number; to: number; start: number; duration: number }>();
+  private static readonly RECEPTOR_SPACING = 10;
+
+  private setOverlayVisible(v: boolean): void {
+    if (v === this.overlay.visible) return;
+    const now = performance.now();
+    const current = this.overlayAlpha(now);
+    // PopIn: FadeIn(500, OutQuint); PopOut: FadeOut(300).
+    this.overlay = { visible: v, from: current, to: v ? 1 : 0, start: now, duration: v ? 500 : 300 };
+  }
+
+  private overlayAlpha(now: number): number {
+    const o = this.overlay;
+    if (o.duration <= 0) return o.to;
+    const t = Math.min(1, (now - o.start) / o.duration);
+    const e = o.to > o.from ? 1 - Math.pow(1 - t, 5) : t;
+    return o.from + (o.to - o.from) * e;
+  }
+
+  /** ColumnInputReceptor under a point (receptors share the width, inflated into the gaps). */
+  private receptorAt(x: number, y: number): ColumnState | null {
+    const { w, h } = this.viewSize;
+    if (w === 0 || y < h / 2 || this.columns.length === 0) return null;
+    const n = this.columns.length;
+    const width = (w - ColumnSpacing(n)) / n;
+    const pitch = width + DrawableManiaRuleset.RECEPTOR_SPACING;
+    const index = Math.min(n - 1, Math.max(0, Math.floor((x + DrawableManiaRuleset.RECEPTOR_SPACING / 2) / pitch)));
+    return this.columns[index];
+  }
+
+  private drawTouchOverlay(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    const now = performance.now();
+    const alpha = this.overlayAlpha(now);
+    if (alpha <= 0) return;
+    const n = this.columns.length;
+    const spacing = DrawableManiaRuleset.RECEPTOR_SPACING;
+    const width = (w - ColumnSpacing(n)) / n;
+    ctx.save();
+    for (let i = 0; i < n; i++) {
+      const x = i * (width + spacing);
+      const pressed = this.columns[i].touchCount > 0;
+      let hl = this.receptorHighlight.get(i);
+      const target = pressed ? 0.1 : 0;
+      if (!hl || hl.to !== target) {
+        const cur = hl ? valueAtHighlight(hl, now) : 0;
+        hl = { from: cur, to: target, start: now, duration: pressed ? 80 : 400 };
+        this.receptorHighlight.set(i, hl);
+      }
+      ctx.globalAlpha = alpha * 0.15;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.roundRect(x, h / 2, width, h / 2, 10);
+      ctx.fill();
+      const ha = valueAtHighlight(hl, now);
+      if (ha > 0) {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = alpha * ha;
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    }
     ctx.restore();
   }
 
@@ -1782,4 +1859,15 @@ function compactExplosions(c: ColumnState, time: number): void {
   let n = 0;
   while (n < c.explosions.length && time - c.explosions[n].time >= EXPLOSION_DURATION) n++;
   if (n > 0) c.explosions.splice(0, n);
+}
+
+/** Total width of the gutters between receptors. */
+function ColumnSpacing(n: number): number {
+  return Math.max(0, n - 1) * 10;
+}
+
+/** Highlight fade: FadeTo(0.1, 80, OutQuint) on press, FadeTo(0, 400, OutQuint) on release. */
+function valueAtHighlight(hl: { from: number; to: number; start: number; duration: number }, now: number): number {
+  const t = Math.min(1, (now - hl.start) / hl.duration);
+  return hl.from + (hl.to - hl.from) * (1 - Math.pow(1 - t, 5));
 }

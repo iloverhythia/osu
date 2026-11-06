@@ -241,7 +241,7 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
         items: [
           check('High precision mouse', 'input.highPrecision', { hint: 'Attempts to bypass any operating system mouse acceleration. On Windows, this is equivalent to what used to be known as "Raw Input".', keywords: ['raw', 'input', 'relative', 'cursor'] }),
           sensitivityItem(),
-          dropdown('Confine mouse cursor to window', 'input.confine', [['never', 'Never'], ['duringGameplay', 'During Gameplay'], ['always', 'Always']] as const, { unavailable: true }),
+          dropdown('Confine mouse cursor to window', 'input.confine', [['never', 'Never'], ['duringGameplay', 'During Gameplay'], ['always', 'Always']] as const, { hint: 'Browsers can only confine the cursor while it is locked to the game, so this applies during osu! gameplay.' }),
           check('Disable mouse wheel adjusting volume during gameplay', 'input.mouseDisableWheel', { hint: 'Volume can still be adjusted using the mouse wheel by holding "Alt"' }),
           check('Disable clicks during gameplay', 'gameplay.disableMouseButtons'),
         ],
@@ -378,7 +378,7 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
         dropdown('Scrolling direction', 'mania.scrollDirection', [['down', 'Down'], ['up', 'Up']] as const),
         slider('Scroll speed', 'mania.scrollSpeed', 1, 40, 0.1, { keyboardStep: 1, format: v => `${Math.floor(MAX_TIME_RANGE / v)}ms (speed ${v.toFixed(1)})` }),
         check('Timing-based note colouring', 'mania.timingBasedColouring', { keywords: ['color'] }),
-        check('Touch overlay', 'mania.touchOverlay', { unavailable: true }),
+        check('Touch overlay', 'mania.touchOverlay'),
       ];
     }
     // RulesetSection only exists for rulesets that create settings (osu!catch has none).
@@ -435,7 +435,7 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
         header: 'Screenshots',
         items: [
           dropdown('Screenshot format', 'graphics.screenshotFormat', [['png', 'PNG (lossless)'], ['jpg', 'JPG (web-friendly)']] as const),
-          check('Show menu cursor in screenshots', 'graphics.screenshotCursor', { unavailable: true }),
+          check('Show menu cursor in screenshots', 'graphics.screenshotCursor'),
         ],
       },
     ],
@@ -499,7 +499,24 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
         header: 'Beatmaps',
         items: [
           button('Delete ALL beatmaps', () => void deleteAllBeatmaps(), { dangerous: true }),
-          button('Delete ALL beatmap videos', () => {}, { dangerous: true, unavailable: true }),
+          button(
+            'Delete ALL beatmap videos',
+            async () => {
+              if (!(await confirmDialog(game, 'Are you sure you want to delete all beatmap videos? This cannot be undone!', 'Yes. Go for it.'))) return;
+              let n = 0;
+              const VIDEO = /\.(mp4|m4v|mov|avi|flv|mpg|mpeg|wmv|webm|mkv)$/i;
+              for (const set of game.library.sets) {
+                if (set.builtIn) continue;
+                const videos = Object.keys(set.files).filter(f => VIDEO.test(f));
+                if (videos.length === 0) continue;
+                for (const v of videos) delete set.files[v];
+                n += videos.length;
+                await Database.putSet(set).catch(() => {});
+              }
+              game.toast(`Deleted ${n} beatmap video${n === 1 ? '' : 's'}`, 'success');
+            },
+            { dangerous: true },
+          ),
           button(
             'Reset ALL beatmap offsets',
             async () => {

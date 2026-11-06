@@ -731,11 +731,14 @@ export class PlayerScreen extends Screen {
   }
 
   private requestHighPrecision(e: PointerEvent): void {
-    if (!settings.get('input.highPrecision', false) || this.pointerLocked || e.pointerType !== 'mouse' || this.ruleset.shortName !== 'osu') return;
+    // High precision mouse, or OsuConfineMouseMode (DuringGameplay / Always): the browser can only confine the cursor with pointer lock.
+    const highPrecision = settings.get('input.highPrecision', false);
+    const confine = settings.get<string>('input.confine', 'never') !== 'never';
+    if (!(highPrecision || confine) || this.pointerLocked || e.pointerType !== 'mouse' || this.ruleset.shortName !== 'osu') return;
     this.virtualPointer = this.localPos(e);
     const c = this.canvas as HTMLCanvasElement & { requestPointerLock(o?: { unadjustedMovement?: boolean }): Promise<void> | void };
     try {
-      const r = c.requestPointerLock({ unadjustedMovement: true });
+      const r = c.requestPointerLock(highPrecision ? { unadjustedMovement: true } : undefined);
       if (r && typeof (r as Promise<void>).catch === 'function') (r as Promise<void>).catch(() => c.requestPointerLock());
     } catch {
       /* not supported */
@@ -749,7 +752,7 @@ export class PlayerScreen extends Screen {
   private localPos(e: PointerEvent): { x: number; y: number } {
     if (this.pointerLocked && e.pointerType === 'mouse' && this.virtualPointer) {
       const rect = this.canvas.getBoundingClientRect();
-      const s = settings.get('input.sensitivity', 1);
+      const s = settings.get('input.highPrecision', false) ? settings.get('input.sensitivity', 1) : 1;
       this.virtualPointer = {
         x: Math.min(rect.width, Math.max(0, this.virtualPointer.x + e.movementX * s)),
         y: Math.min(rect.height, Math.max(0, this.virtualPointer.y + e.movementY * s)),

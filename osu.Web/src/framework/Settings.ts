@@ -105,7 +105,8 @@ export const DEFAULT_SETTINGS = {
   'graphics.screenshotCursor': false,
   'input.highPrecision': false,
   'input.sensitivity': 1,
-  'input.confine': 'duringGameplay',
+  // lazer defaults to DuringGameplay; in a browser confining means pointer lock, so it is opt-in.
+  'input.confine': 'never',
   'input.mouseDisableWheel': false,
   'input.touchDisableTaps': false,
   'online.externalLinkWarning': true,

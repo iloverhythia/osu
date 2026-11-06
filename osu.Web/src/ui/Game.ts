@@ -160,6 +160,8 @@ export class Game {
     g.fillStyle = '#000';
     g.fillRect(0, 0, w, hgt);
     for (const l of layers) g.drawImage(l, 0, 0, w, hgt);
+    // OsuSetting.ScreenshotCaptureMenuCursor
+    if (settings.get('graphics.screenshotCursor', false)) this.menuCursor.drawInto(g, w / window.innerWidth);
     const png = settings.get<string>('graphics.screenshotFormat', 'jpg') === 'png';
     const blob = await new Promise<Blob | null>(r => c.toBlob(r, png ? 'image/png' : 'image/jpeg', 0.92));
     if (!blob) return;

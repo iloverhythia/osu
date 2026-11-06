@@ -79,6 +79,26 @@ export class MenuCursor {
 
   private outside = false;
 
+  /** ScreenshotManager.CursorVisibility: draws the cursor into a screenshot (canvas pixels per CSS px = `scale`). */
+  drawInto(g: CanvasRenderingContext2D, scale: number): void {
+    if (!this.visible || this.alpha.value <= 0) return;
+    const s = this.scale.value * settings.get('ui.menuCursorSize', 1) * scale;
+    g.save();
+    g.translate(this.x * scale, this.y * scale);
+    g.rotate((this.rotation.value * Math.PI) / 180);
+    g.scale(s, s);
+    g.translate(-2, -2);
+    const p = new Path2D('M2 2 L2 27 L8.5 21 L13 31 L17.5 29 L13 19.5 L22 19.5 Z');
+    g.globalAlpha = this.alpha.value;
+    g.lineJoin = 'round';
+    g.lineWidth = 2;
+    g.strokeStyle = 'rgba(0,0,0,0.65)';
+    g.fillStyle = '#fff';
+    g.fill(p);
+    g.stroke(p);
+    g.restore();
+  }
+
   private readonly onMove = (e: PointerEvent): void => {
     this.lastInputWasMouse = e.pointerType === 'mouse';
     this.x = e.clientX;
