@@ -6,6 +6,7 @@
 // ModPresetColumn is not ported (presets are stored in Realm in lazer).
 
 import '../select/select.css';
+import { settings } from '../../framework/Settings';
 import { MOD_SETTINGS, MODS, ModDef, ModType } from '../../game/mods/Mods';
 import { clear, h } from '../dom';
 import type { Game } from '../Game';
@@ -26,6 +27,20 @@ const COLUMN_WIDTH = 320;
 const DISTANCE = 700;
 
 /** Lazer's column order: reduction, increase, automation, conversion, fun. */
+/** ClassicModHotkeyHandler.mod_type_lookup */
+const CLASSIC_HOTKEYS: Record<string, string[]> = {
+  KeyQ: ['EZ'],
+  KeyW: ['NF'],
+  KeyE: ['HT', 'DC'],
+  KeyA: ['HR'],
+  KeyS: ['SD', 'PF'],
+  KeyD: ['DT', 'NC'],
+  KeyF: ['HD', 'TC'],
+  KeyG: ['FL', 'BL'],
+  KeyZ: ['RX'],
+  KeyV: ['AT', 'CN'],
+};
+
 const COLUMNS: { type: ModType; title: string; keys: string[] | null }[] = [
   { type: 'reduction', title: 'Difficulty Reduction', keys: ['KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyP'] },
   { type: 'increase', title: 'Difficulty Increase', keys: ['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK', 'KeyL'] },
@@ -523,6 +538,27 @@ class ModSelectOverlay {
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (e.repeat) return true;
+    // ClassicModHotkeyHandler (ModSelectHotkeyStyle.Classic): stable's fixed keys, cycling through related mods.
+    if (settings.get<string>('ui.modSelectHotkeyStyle', 'sequential') === 'classic') {
+      const types = CLASSIC_HOTKEYS[e.code];
+      if (!types) return true;
+      for (const col of this.columns) {
+        if (!col.keys) continue;
+        const matching = col.panels.filter(x => x.visible && types.includes(x.def.acronym));
+        if (matching.length === 0) continue;
+        if (matching.length === 1) {
+          this.togglePanel(matching[0]);
+          return true;
+        }
+        let current = matching.findIndex(x => this.isActive(x.def));
+        if (current < 0 && e.shiftKey) current = matching.length;
+        const next = e.shiftKey ? current - 1 : current + 1;
+        if (current >= 0 && current <= matching.length - 1) this.togglePanel(matching[current], false);
+        if (next >= 0 && next <= matching.length - 1) this.togglePanel(matching[next], true);
+        return true;
+      }
+      return true;
+    }
     // SequentialModHotkeyHandler (the default ModSelectHotkeyStyle)
     for (const col of this.columns) {
       if (!col.keys) continue;
@@ -570,8 +606,8 @@ class ModSelectOverlay {
         this.opts.ownerButton.updateDisplay();
       }
     } else this.root.appendChild(h('div', { class: 'mso-standalone-footer', style: { background: css(this.colours.background5) } }, this.footerContent)), this.footerContent.classList.add('visible');
-    // ModSelectTextSearchStartsActive = true
-    setTimeout(() => this.setTextBoxFocus(true), 0);
+    // OsuSetting.ModSelectTextSearchStartsActive
+    setTimeout(() => this.setTextBoxFocus(settings.get('ui.modSelectSearchAutofocus', true)), 0);
   }
 
   hide(fromGame = false): void {

@@ -250,7 +250,7 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
         items: [
           check('Rotate cursor when dragging', 'ui.cursorRotation', { unavailable: true }),
           slider('Menu cursor size', 'ui.menuCursorSize', 0.5, 2, 0.01, { keyboardStep: 0.01, format: v => `${v.toFixed(2)}x`, unavailable: true }),
-          slider('Parallax', 'ui.parallax', 0, 2, 0.1, { percent: true, unavailable: true }),
+          slider('Parallax', 'ui.parallax', 0, 2, 0.1, { percent: true }),
           slider('Hold-to-confirm activation time', 'ui.holdActivationDelay', 0, 500, 50, { keyboardStep: 50, format: v => `${v} ms`, keywords: ['delay'] }),
         ],
       },
@@ -269,10 +269,10 @@ export function buildSections(game: Game, openKeyBindings: () => void): SectionD
         header: 'Song Select',
         items: [
           check('Show converted beatmaps', 'select.showConverts', { keywords: ['convert', 'converted'] }),
-          dropdown('Random selection algorithm', 'select.randomAlgorithm', [['permutation', 'Never repeat'], ['random', 'True Random']] as const, { unavailable: true }),
-          dropdown('Mod select hotkey style', 'ui.modSelectHotkeyStyle', [['sequential', 'Sequential'], ['classic', 'Classic']] as const, { hint: 'Sequential: Uses a sequence of letters to select mods. Classic: Uses osu!stable mod hotkeys.', unavailable: true }),
-          check('Automatically focus search text box in mod select', 'ui.modSelectSearchAutofocus', { unavailable: true }),
-          check('Background blur', 'select.backgroundBlur', { unavailable: true }),
+          dropdown('Random selection algorithm', 'select.randomAlgorithm', [['permutation', 'Never repeat'], ['random', 'True Random']] as const),
+          dropdown('Mod select hotkey style', 'ui.modSelectHotkeyStyle', [['sequential', 'Sequential'], ['classic', 'Classic']] as const, { hint: 'Sequential: Uses a sequence of letters to select mods. Classic: Uses osu!stable mod hotkeys.' }),
+          check('Automatically focus search text box in mod select', 'ui.modSelectSearchAutofocus'),
+          check('Background blur', 'select.backgroundBlur'),
         ],
       },
     ],

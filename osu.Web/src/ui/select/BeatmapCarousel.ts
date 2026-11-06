@@ -4,6 +4,7 @@
 // (arrows, left/right set, page up/down, home/end, shift+left/right groups), random selection with rewind, and a virtualised,
 // pooled DOM panel display with the circular X offset curve and damped Y movement.
 
+import { settings } from '../../framework/Settings';
 import { dampContinuously } from './Anim';
 import {
   CarouselItem,
@@ -612,6 +613,12 @@ export class BeatmapCarousel {
   private nextRandomBeatmap(): boolean {
     const groupEntry = this.expandedGroup ? this.grouping!.groupItems.get(this.expandedGroup.key) : undefined;
     const visible = (groupEntry ? groupEntry.items : this.carouselItems!).map(i => i.model).filter((m): m is GroupedBeatmap => m instanceof GroupedBeatmap);
+    // RandomSelectAlgorithm.Random: any visible beatmap.
+    if (settings.get<string>('select.randomAlgorithm', 'permutation') === 'random') {
+      if (visible.length === 0) return false;
+      this.callbacks.requestSelection(visible[Math.floor(Math.random() * visible.length)]);
+      return true;
+    }
     let notYetVisited = visible.filter(b => !this.previouslyVisitedRandomBeatmaps.has(b.beatmap.id));
     if (notYetVisited.length === 0) {
       for (const b of visible) this.previouslyVisitedRandomBeatmaps.delete(b.beatmap.id);
@@ -627,6 +634,11 @@ export class BeatmapCarousel {
   private nextRandomSet(): boolean {
     const groupEntry = this.expandedGroup ? this.grouping!.groupItems.get(this.expandedGroup.key) : undefined;
     const visibleSets = groupEntry ? groupEntry.items.map(i => i.model).filter((m): m is GroupedBeatmapSet => m instanceof GroupedBeatmapSet) : [...this.grouping!.setItems.values()].map(v => v.set);
+    if (settings.get<string>('select.randomAlgorithm', 'permutation') === 'random') {
+      if (visibleSets.length === 0) return false;
+      this.selectRecommendedDifficultyForBeatmapSet(visibleSets[Math.floor(Math.random() * visibleSets.length)]);
+      return true;
+    }
     const visitedSetIds = new Set<string>();
     for (const s of visibleSets) if (s.beatmapSet.beatmaps.some(b => this.previouslyVisitedRandomBeatmaps.has(b.id))) visitedSetIds.add(s.beatmapSet.id);
     let notYetVisited = visibleSets.filter(s => !visitedSetIds.has(s.beatmapSet.id));
@@ -651,7 +663,7 @@ export class BeatmapCarousel {
       const previousItem = candidates.find(i => ((i.model as GroupedBeatmap).group?.key ?? null) === (previous.group?.key ?? null)) ?? candidates[0];
       if (!previousItem) return false;
       const cur = this.currentSelection.model;
-      if (cur instanceof GroupedBeatmap) this.previouslyVisitedRandomBeatmaps.delete(cur.beatmap.id);
+      if (cur instanceof GroupedBeatmap && settings.get<string>('select.randomAlgorithm', 'permutation') === 'permutation') this.previouslyVisitedRandomBeatmaps.delete(cur.beatmap.id);
       this.callbacks.playSample('random');
       this.callbacks.requestSelection(previousItem.model as GroupedBeatmap);
       return true;

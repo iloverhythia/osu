@@ -26,6 +26,8 @@ export class Game {
 
   private readonly bgA: HTMLDivElement;
   private readonly bgB: HTMLDivElement;
+  private readonly bgParallax: HTMLDivElement;
+  private parallax = { x: 0, y: 0, scale: 1, mouse: null as { x: number; y: number } | null };
   private bgFront: 'A' | 'B' = 'A';
   private readonly bgDim: HTMLDivElement;
   private readonly triangles: Triangles;
@@ -66,7 +68,7 @@ export class Game {
     this.folderInput.setAttribute('webkitdirectory', '');
 
     root.append(
-      h('div', { class: 'layer' }, this.bgA, this.bgB, this.bgDim),
+      h('div', { class: 'layer' }, (this.bgParallax = h('div', { class: 'bg-parallax' }, this.bgA, this.bgB)), this.bgDim),
       this.triangles.canvas,
       this.screenLayer,
       this.overlayLayer,
@@ -214,6 +216,32 @@ export class Game {
 
   // ------------------------------------------------------------------ background
 
+  /** OsuScreenStack's ParallaxContainer around the background stack (DEFAULT_PARALLAX_AMOUNT × screen amount × MenuParallaxScale). */
+  private updateParallax(elapsed: number): void {
+    const p = this.parallax;
+    const amount = 0.02 * (this.currentScreen?.backgroundParallaxAmount ?? 1) * settings.get('ui.parallax', 1);
+    if (amount === 0 && p.x === 0 && p.y === 0 && p.scale === 1) return;
+    const w = window.innerWidth;
+    const hgt = window.innerHeight;
+    let ox = 0;
+    let oy = 0;
+    if (p.mouse) {
+      const damp = (v: number) => 1 - Math.pow(0.999, v);
+      const rx = p.mouse.x - w / 2;
+      const ry = p.mouse.y - hgt / 2;
+      ox = Math.sign(rx) * damp(Math.abs(rx)) * (w / 2) * amount;
+      oy = Math.sign(ry) * damp(Math.abs(ry)) * (hgt / 2) * amount;
+    }
+    const outQuint = (t: number) => 1 - Math.pow(1 - t, 5);
+    const tPos = outQuint(Math.min(1, elapsed / 100));
+    const tScale = outQuint(Math.min(1, elapsed / 1000));
+    p.x = Math.abs(p.x - ox) < 1e-3 ? ox : p.x + (ox - p.x) * tPos;
+    p.y = Math.abs(p.y - oy) < 1e-3 ? oy : p.y + (oy - p.y) * tPos;
+    const target = 1 + Math.abs(amount);
+    p.scale = Math.abs(p.scale - target) < 1e-4 ? target : p.scale + (target - p.scale) * tScale;
+    this.bgParallax.style.transform = `translate(${p.x.toFixed(2)}px, ${p.y.toFixed(2)}px) scale(${p.scale.toFixed(4)})`;
+  }
+
   setBackground(url: string | null): void {
     const next = this.bgFront === 'A' ? this.bgB : this.bgA;
     const prev = this.bgFront === 'A' ? this.bgA : this.bgB;
@@ -276,7 +304,7 @@ export class Game {
     s.el.classList.remove('leaving');
     if (!s.el.isConnected) this.screenLayer.appendChild(s.el);
     s.el.style.display = '';
-    this.setBackgroundDim(s.backgroundDim);
+    this.setBackgroundDim(s.backgroundDim, s.backgroundBlur);
     this.triangles.running = s.showTriangles;
     this.triangles.canvas.style.display = s.showTriangles ? '' : 'none';
   }
@@ -504,9 +532,13 @@ export class Game {
   private setupFps(): void {
     let frames = 0;
     let last = performance.now();
+    window.addEventListener('pointermove', e => (this.parallax.mouse = { x: e.clientX, y: e.clientY }), { passive: true });
+    let lastFrame = performance.now();
     const loop = () => {
       frames++;
       const now = performance.now();
+      this.updateParallax(Math.min(100, Math.max(0, now - lastFrame)));
+      lastFrame = now;
       if (now - last >= 500) {
         if (settings.get('graphics.showFps', false)) this.fpsEl.textContent = `${Math.round((frames * 1000) / (now - last))} fps`;
         else this.fpsEl.textContent = '';

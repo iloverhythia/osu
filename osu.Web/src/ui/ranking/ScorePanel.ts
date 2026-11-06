@@ -5,6 +5,7 @@
 // Contracted/ContractedPanelMiddleContent.cs, Contracted/ContractedPanelTopContent.cs and
 // osu.Game/Beatmaps/Drawables/StarRatingDisplay.cs. Torus is substituted by Exo 2.
 
+import { settings } from '../../framework/Settings';
 import { getDisplayScore } from '../../game/scoring/DisplayScore';
 import { MOD_BY_ACRONYM, MOD_TYPE_COLOURS } from '../../game/mods/Mods';
 import { HitResult } from '../../game/scoring/HitResult';
@@ -488,14 +489,16 @@ class ExpandedPanelMiddleContent implements Content {
   }
 }
 
-/** PlayedOnText: "d MMMM yyyy h:mm tt". */
-function formatPlayedOn(date: number): string {
+/** PlayedOnText: "d MMMM yyyy HH:mm" with OsuSetting.Prefer24HourTime, else "d MMMM yyyy h:mm tt". */
+export function formatPlayedOn(date: number, prefer24 = settings.get<boolean>('ui.prefer24h', true)): string {
   const d = new Date(date);
   const month = d.toLocaleString('en-US', { month: 'long' });
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  if (prefer24) return `${d.getDate()} ${month} ${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${minutes}`;
   let hours = d.getHours();
   const ampm = hours >= 12 ? 'PM' : 'AM';
   hours = hours % 12 || 12;
-  return `${d.getDate()} ${month} ${d.getFullYear()} ${hours}:${String(d.getMinutes()).padStart(2, '0')} ${ampm}`;
+  return `${d.getDate()} ${month} ${d.getFullYear()} ${hours}:${minutes} ${ampm}`;
 }
 
 // ------------------------------------------------------------------ contracted

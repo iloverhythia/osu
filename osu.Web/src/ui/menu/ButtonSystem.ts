@@ -5,6 +5,7 @@
 // Buttons available offline: top level = play, browse (→ import beatmaps), settings; play = solo. Multiplayer,
 // playlists, daily challenge, the editors and exit (the host can't exit on the web) are not shown.
 
+import { settings } from '../../framework/Settings';
 import type { Game } from '../Game';
 import { BeatSync, type MenuBeatSource } from './BeatSync';
 import { icon, type ICONS } from './icons';
@@ -594,7 +595,7 @@ export class ButtonSystem {
     // ParallaxContainer (ParallaxAmount = 0.01).
     const w = this.el.clientWidth;
     const h = this.el.clientHeight;
-    const amount = 0.01;
+    const amount = 0.01 * settings.get('ui.parallax', 1);
     let ox = 0;
     let oy = 0;
     if (this.mouse) {

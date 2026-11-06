@@ -68,6 +68,11 @@ export class PlayerScreen extends Screen {
   private readonly bgDimEl: HTMLDivElement;
   private bgDimOpacity = -1;
   private bgBlur = 0;
+
+  /** Player.BackgroundParallaxAmount */
+  get backgroundParallaxAmount(): number {
+    return 0.1;
+  }
   private beatmapHitsounds = true;
   /** Key of what's currently drawn on the background layer (image + size), to redraw only when it changes. */
   private bgCanvasKey = '';

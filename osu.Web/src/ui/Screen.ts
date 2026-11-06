@@ -6,6 +6,15 @@ export abstract class Screen {
   readonly el: HTMLElement;
   /** Background dim while this screen is shown (0..1). */
   backgroundDim = 0.5;
+  /** Background blur in px (BackgroundScreenBeatmap.BlurAmount). */
+  /** IOsuScreen.BackgroundParallaxAmount */
+  get backgroundParallaxAmount(): number {
+    return 1;
+  }
+
+  get backgroundBlur(): number {
+    return 0;
+  }
   /** Whether the triangles background should be visible. */
   showTriangles = true;
 

@@ -3,6 +3,15 @@
 
 const STORAGE_KEY = 'osu-web.settings';
 
+function prefers24HourTime(): boolean {
+  try {
+    const hc = new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hourCycle;
+    return hc === 'h23' || hc === 'h24';
+  } catch {
+    return true;
+  }
+}
+
 export const DEFAULT_SETTINGS = {
   // FrameworkConfigManager VolumeUniversal / VolumeMusic / VolumeEffect defaults.
   'audio.master': 1,
@@ -56,7 +65,8 @@ export const DEFAULT_SETTINGS = {
   'ui.sortMode': 'title',
   // Settings overlay additions (OsuConfigManager / ruleset config defaults).
   'ui.language': 'en',
-  'ui.prefer24h': false,
+  // OsuSetting.Prefer24HourTime defaults to the system culture's short time pattern having no AM/PM designator.
+  'ui.prefer24h': prefers24HourTime(),
   'ui.cursorRotation': true,
   'ui.menuCursorSize': 1,
   'ui.parallax': 1,
@@ -70,7 +80,7 @@ export const DEFAULT_SETTINGS = {
   'ui.modSelectSearchAutofocus': true,
   'select.showConverts': true,
   'select.randomAlgorithm': 'permutation',
-  'select.backgroundBlur': true,
+  'select.backgroundBlur': false,
   'gameplay.scoreDisplayMode': 'standardised',
   'gameplay.hitLighting': true,
   'gameplay.backgroundBlur': 0,

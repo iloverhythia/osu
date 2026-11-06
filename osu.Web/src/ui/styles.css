@@ -489,3 +489,9 @@ canvas.triangles {
   scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 
+
+.bg-parallax {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}

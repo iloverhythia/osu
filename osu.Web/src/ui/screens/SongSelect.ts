@@ -188,6 +188,9 @@ export class SongSelectScreen extends Screen {
     this.optionsButton = new FooterButtonOptions(fc);
     this.optionsButton.getEntries = () => this.optionsEntries();
     this.footer.setButtons([this.modsButton, this.randomButton, this.optionsButton]);
+    settings.subscribe(k => {
+      if (k === 'select.backgroundBlur') this.updateBackgroundBlur();
+    });
 
     // ---------------------------------------------------------------- layout
     this.rulesetTabs = h('div', { class: 'ss-ruleset-selector' });
@@ -267,9 +270,18 @@ export class SongSelectScreen extends Screen {
     if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => this.filterControl.search.focus({ preventScroll: true }), 50);
   }
 
+  /** SongSelect.updateBackgroundBlur: BlurAmount = SongSelectBackgroundBlur && !backgroundRevealActive ? 20 : 0 */
+  get backgroundBlur(): number {
+    return settings.get('select.backgroundBlur', false) && !this.revealed ? 20 * (window.innerHeight / 768) : 0;
+  }
+
+  private updateBackgroundBlur(): void {
+    if (this.current) this.game.setBackgroundDim(this.backgroundDim, this.backgroundBlur);
+  }
+
   onResume(): void {
     this.current = true;
-    this.game.setBackgroundDim(this.backgroundDim);
+    this.game.setBackgroundDim(this.backgroundDim, this.backgroundBlur);
     // SoloSongSelect.revertMods
     if (this.modsAtGameplayStart) {
       this.game.setMods(this.modsAtGameplayStart);
@@ -684,6 +696,7 @@ export class SongSelectScreen extends Screen {
       window.removeEventListener('pointermove', move);
       if (this.carousel.absoluteScrolling) return;
       this.revealed = true;
+      this.updateBackgroundBlur();
       const ease = cssEasing(Easing.OutQuint);
       this.mainContent.style.transition = `transform 600ms ${ease}, opacity 200ms ${ease}`;
       this.mainContent.style.transform = 'scale(1.2)';
@@ -700,6 +713,7 @@ export class SongSelectScreen extends Screen {
     this.revealTimer = 0;
     if (this.revealed) {
       this.revealed = false;
+      this.updateBackgroundBlur();
       const ease = cssEasing(Easing.OutQuint);
       this.mainContent.style.transition = `transform 500ms ${ease}, opacity 500ms ${ease}`;
       this.mainContent.style.transform = '';

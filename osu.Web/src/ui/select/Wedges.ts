@@ -3,6 +3,7 @@
 // .StatisticDifficulty, .Statistic), BeatmapDetailsArea.cs (+ .Header, .WedgeSelector), BeatmapMetadataWedge.cs (+ .MetadataDisplay,
 // .TagsLine; offline parts only), BeatmapLeaderboardWedge.cs + BeatmapLeaderboardScore.cs (local scope) and NoResultsPlaceholder.cs.
 
+import { formatPlayedOn } from '../ranking/ScorePanel';
 import { getDisplayScore } from '../../game/scoring/DisplayScore';
 import type { Beatmap } from '../../game/beatmaps/Beatmap';
 import type { WorkingBeatmap } from '../../game/beatmaps/WorkingBeatmap';
@@ -796,7 +797,7 @@ function scoreRow(host: SongSelectHost, s: ScoreRecord, rank: number): HTMLDivEl
 
   const row = h(
     'div',
-    { class: `lb-score${s.hasReplay ? ' has-replay' : ''}`, title: s.hasReplay ? 'Click to watch the replay' : '' },
+    { class: `lb-score${s.hasReplay ? ' has-replay' : ''}`, title: `${formatPlayedOn(s.date)}${s.hasReplay ? '\nClick to watch the replay' : ''}` },
     h('div', { class: 'lbs-bg', style: { background: css(bg, 0.4) } }),
     h('div', { class: 'lbs-rank' }, h('span', { class: 'lbs-unshear', style: { color: css(c.content1) } }, `#${rank}`)),
     h(
