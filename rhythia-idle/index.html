@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Idle for Rhythia</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='26' fill='none' stroke='%238aa4ff' stroke-width='9'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- the play view: the bot playing the current map, with the HUD around it -->
+  <main id="playView" class="playView">
+    <div id="pvBg" class="pvBg"></div>
+    <div id="results" class="results hidden" role="dialog" aria-label="Results"></div>
+    <div class="pvHead">
+      <div class="pvTitle"><b id="mapName"></b></div>
+      <div id="time" class="pvTime">0:00 / 0:00</div>
+      <div class="pvBar"><div id="progress"></div></div>
+    </div>
+    <div class="pvStage">
+      <div class="pvCombo"><div class="tri"><svg viewBox="0 0 100 88" aria-hidden="true"><polygon points="50,6 95,83 5,83"/></svg><b id="combo">0</b></div></div>
+      <div class="pvStat pvPoints"><label>Points</label><b id="earned">0</b></div>
+      <div class="pvStat pvAcc"><label>Accuracy</label><b id="acc">100%</b></div>
+      <div class="pvStat pvMiss"><label>Misses</label><b id="misses">0</b></div>
+      <div class="pvField">
+        <div class="canvasWrap" id="canvasWrap"><canvas id="game"></canvas></div>
+        <div class="bar health pvHealth"><div id="health"></div></div>
+        <div id="pvGuide" class="pvGuide"><div id="goals" class="pvGoals" hidden></div><button id="hintLine" class="pvHint" hidden></button></div>
+      </div>
+    </div>
+
+    <aside id="pvBoard" class="pvBoard" aria-label="Map scoreboard"></aside>
+
+    <aside class="pvCard pvSkills">
+      <div id="profile" class="profile"></div>
+      <div class="pvWarm" title="Warm-up: clears warm you up, fails cool you down">
+        <div><b>Warm-up</b><span id="warmLabel">Cold</span></div>
+        <div class="warmBar"><i id="warmMark"></i></div><small id="warmEffect"></small>
+      </div>
+    </aside>
+
+    <div class="pvAbort"><button id="btnAbort" title="Give up this play: it counts as a fail">abort</button><button id="btnQuit" title="Back to map select">quit</button></div>
+    <div class="pvScore"><div><b id="scGrade">SS</b><span id="scScore">00000000</span></div><small id="scAcc">--</small><div id="scMods" class="scMods"></div></div>
+    <div id="widgets" class="widgets"><div id="wRp" class="widget hidden"></div><div id="wStats" class="widget hidden"></div></div>
+
+    <div id="ticker" class="ticker" aria-live="polite"></div>
+
+    <div id="mp" class="mp">
+      <div id="mpQueue" class="mpQueue"></div>
+      <div class="mpNow"><span class="mpMark">▶</span><b id="mpTitle"></b><span id="mpState" class="mpState"></span></div>
+      <div class="mpRow"><button id="mpNext" class="mpNext">→ Next song</button><span id="mpClock" class="mpClock"></span></div>
+    </div>
+  </main>
+
+  <!-- the main menu rail -->
+  <nav id="dock" class="dock" aria-label="Main menu">
+    <button id="navPlay" data-nav="play" title="Back to your play"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg><span>Play</span></button>
+    <button id="btnMaps" data-nav="maps" title="Map select (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.5"/></svg><span>Maps</span></button>
+    <button id="btnSkills" data-nav="skills" title="Skills, gear and seasons"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 20h16M7 16v-4M12 16V6M17 16v-7"/></svg><span>Skills</span></button>
+    <button id="btnBoard" data-nav="rankings" title="Leaderboards"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 20h7"/></svg><span>Rankings</span></button>
+    <button id="btnProfile" data-nav="profile" title="Your profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg><span>Profile</span></button>
+    <button id="btnOnline" data-nav="online" title="Online players and chat (F9)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H10l-4 4v-4h.5A2.5 2.5 0 0 1 4 13.5z"/></svg><b id="onlineCount" class="navCount">–</b><span>Online</span></button>
+    <button id="btnGoto" class="gotoBtn" title="Go to any screen or tab (Ctrl+K or /)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg><span>Find</span></button>
+    <i class="dockGap"></i>
+    <button id="btnStats" title="Game stats (Ctrl+Shift+G)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg><span>Stats</span></button>
+    <button id="btnAudio" class="audioBtn" title="Music on or off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg><span>Music</span></button>
+    <button id="btnGuide" data-nav="guide" title="How the game works"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.4M12 16.8v.2"/></svg><span>Guide</span></button>
+    <button id="btnSettings" data-nav="settings" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><span>Settings</span></button>
+  </nav>
+
+  <!-- skills and progression panel -->
+  <div id="skills" class="skillsBox hidden" role="dialog" aria-label="Skills and progress">
+    <section class="panel" id="upgradesPanel">
+      <button id="skillsClose" class="skillsClose" aria-label="Close">✕</button>
+      <nav class="tabs" id="tabs">
+        <div class="tabGroup"><small>Train</small><div><button data-tab="skills">Skills</button><button data-tab="gear">Gear</button></div></div>
+        <div class="tabGroup"><small>Upgrade</small><div><button data-tab="instincts">Instincts</button><button data-tab="prestige">Prestige</button></div></div>
+        <div class="tabGroup"><small>Spend</small><div><button data-tab="shop">Shop</button><button data-tab="unlocks">Unlocks</button></div></div>
+        <div class="tabGroup"><small>Reset</small><div><button data-tab="season">Season</button><button data-tab="rebirth">Rebirth</button><button data-tab="ascend">Ascension</button><button data-tab="transcend">Transcendence</button></div></div>
+        <div class="tabGroup"><small>Overview</small><div><button data-tab="boosts">Boosts</button></div></div>
+      </nav>
+      <div id="tabWhere" class="tabWhere"></div>
+      <div id="tabIntro" class="tabIntro"></div>
+      <div id="tabBody" class="tabPage"></div>
+    </section>
+  </div>
+
+  <div id="lbp" class="pp hidden" role="dialog" aria-label="Leaderboards"><div id="lbpBox" class="ppBox"></div></div>
+  <div id="guide" class="pp hidden" role="dialog" aria-label="Guide"><div id="guideBox" class="ppBox guideBox"></div></div>
+  <div id="pp" class="pp hidden" role="dialog" aria-label="Your profile"><div id="ppBox" class="ppBox"></div></div>
+  <div id="statsP" class="pp hidden" role="dialog" aria-label="Game stats"><div id="statsBox" class="ppBox"></div></div>
+  <div id="goto" class="goto hidden" role="dialog" aria-label="Go to"><div class="gotoBox"><input id="gotoInput" type="search" placeholder="Go to a screen or tab…" autocomplete="off"><div id="gotoList"></div></div></div>
+
+  <div id="toasts" class="toasts"></div>
+
+  <!-- title screen -->
+  <div id="title" class="title hidden">
+    <div id="titleBg" class="titleBg"></div>
+    <div id="titleMain" class="titleMain">
+      <button id="titleLogo" class="titleLogo" aria-label="Play: choose a map"><canvas id="viz"></canvas><span class="logoDisc"><i></i></span></button>
+      <nav class="titleMenu">
+        <button data-t="play">Play</button>
+        <button data-t="profile">Profile</button>
+        <button data-t="settings">Settings</button>
+        <button data-t="online">Online</button>
+        <button data-t="exit" class="titleExit">Exit</button>
+      </nav>
+    </div>
+    <div class="titleBrand"><span class="brandRing"></span>Idle for Rhythia</div>
+    <div id="titleNow" class="titleNow"></div>
+    <button id="titleNotes" class="titleNotes" type="button">Patch notes</button>
+  </div>
+
+  <!-- settings -->
+  <div id="settings" class="settings hidden" role="dialog" aria-label="Settings">
+    <div class="setBox">
+      <div class="setHead"><div><h3>Settings</h3></div><button id="setClose" aria-label="Close">✕</button></div>
+      <div class="setPanel">
+        <div class="setTools"><button data-act="exportSettings">Export settings</button><button data-act="importSettings">Import settings</button><button data-act="resetSettings">Reset settings</button></div>
+        <input id="setSearch" type="search" placeholder="Search settings" autocomplete="off">
+        <div id="setBody" class="setBody"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- map select -->
+  <div id="select" class="select hidden" role="dialog" aria-label="Select map">
+    <div class="selBg"></div>
+    <div class="selBox">
+      <div id="selDetail" class="selLeft"></div>
+      <div class="selRight">
+        <div class="selTop"><div id="selControls" class="selControls"></div><button id="selClose" aria-label="Close">✕</button></div>
+        <div id="selList" class="selList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- online players and chat -->
+  <div id="online" class="online hidden" role="dialog" aria-label="Online players">
+    <div class="onlineBox">
+      <div class="onlineTop"><div><h3>Online Players</h3><small id="onlineHead"></small></div><button id="onlineClose" aria-label="Close">✕</button></div>
+      <div class="onlineFind"><input id="onlineSearch" type="search" placeholder="Search players…"><button id="onlineFeed" class="feedBtn" aria-pressed="false">Friends</button></div>
+      <div id="onlineList" class="onlineList"></div>
+      <div class="chat">
+        <div class="chanBox"><small>Channels</small><div id="channels" class="channels"><button data-ch="general" class="on">general</button><button data-ch="help">help</button><button data-ch="maps">maps</button></div></div>
+        <div class="chatMain">
+          <div id="chatTitle" class="chatTitle">general</div>
+          <div id="chatLog" class="chatLog"></div>
+          <form id="chatForm" class="chatForm"><input id="chatInput" maxlength="200" placeholder="Write a message…" autocomplete="off"><button>Send</button></form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal" class="modal hidden"><div class="modalBox"><div id="modalBody"></div><div class="modalBtns" id="modalBtns"></div></div></div>
+
+  <script src="data/maps.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/maps.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/ui.js"></script>
+</body>
+</html>
