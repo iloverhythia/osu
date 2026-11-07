@@ -1,38 +1,33 @@
-name: Deploy Idle for Rhythia to GitHub Pages
+name: Publish Idle for Rhythia to GitHub Pages
+
+# The site is served from the gh-pages branch. This copies rhythia-idle/ into the
+# rhythia-idle/ folder of that branch and leaves everything else there alone.
 
 on:
   push:
-    branches: [master, claude/lucid-ramanujan-3tzjab]
+    branches: [master]
     paths:
       - 'rhythia-idle/**'
       - '.github/workflows/rhythia-idle-pages.yml'
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: rhythia-idle-pages
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  publish:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: Configure Pages (enables it on first run)
-        uses: actions/configure-pages@v5
+      - uses: peaceiris/actions-gh-pages@v4
         with:
-          enablement: true
-      - name: Upload the game folder
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: rhythia-idle
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: rhythia-idle
+          destination_dir: rhythia-idle
+          keep_files: true
+          commit_message: 'Deploy Idle for Rhythia'
