@@ -392,6 +392,7 @@ p.small { font-size: 13px; color: var(--muted); }
   .pvCombo, .pvPoints, .pvAcc, .pvMiss { grid-column: 1; grid-row: auto; justify-self: center; }
   .pvSkills { display: none; }
   .mp { left: 80px; right: 16px; width: auto; }
+  .pvStage { padding-bottom: 180px; overflow-y: auto; }
   .ticker { bottom: 150px; }
   .selBox { grid-template-columns: 1fr; }
   .selLeft { display: none; }
