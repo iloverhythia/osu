@@ -257,7 +257,8 @@ function renderPlayBoard() {
   $('pvBoard').innerHTML = show.map(r => `<div class="pbRow${r.me ? ' me' : ''}">${avatar(r.name, r.me ? 320 : r.hue)}<div><b>${r.rank ? '#' + r.rank + ' ' : ''}${esc(shownName(r.name))}</b><small>${r.live ? 'playing now' : `${(r.acc * 100).toFixed(2)}% · ${r.rp} RP${r.speed !== 1 ? ' · ' + r.speed + '×' : ''}`}</small></div></div>`).join('');
 }
 function onRunStart() {
-  const m = run.map;
+  const m = run.map, pv = $('playView');
+  if (!settings.reduceMotion) { pv.classList.remove('entering'); void pv.offsetWidth; pv.classList.add('entering'); setTimeout(() => pv.classList.remove('entering'), 800); }
   $('mapName').textContent = `${m.title} · mapped by ${m.mapper}`;
   $('mpTitle').textContent = m.title;
   $('mpState').textContent = `${shownStars(m, run.speed, run.mods).toFixed(2)}★`;
@@ -304,6 +305,7 @@ function showResults() {
   if (xp) rows.push([r.passed ? 'XP banked' : 'XP lost', `${r.passed ? '+' : ''}${fmt(xp)}`]);
   const mods = [run.speed !== 1 ? `${run.speed}×` : '', ...MODS.filter(x => run.mods[x.id]).map(x => x.name)].filter(Boolean);
   const mask = state.mastery[m.id] || 0;
+  el.style.setProperty('--wait', `${run.endTimer}s`);
   el.innerHTML = `<div class="rsBg"${m.img ? ` style="background-image:url('${m.img}')"` : ''}></div><div class="rsBox">
     <header class="rsHead">${m.img ? `<img class="rsCover" src="${m.img}" alt="">` : '<div class="rsCover"></div>'}
       <div class="rsMap"><h2>${esc(m.title)}</h2><b>by ${esc(m.mapper)}</b>${r.passed || mask ? `<div class="msRs">${MASTERY_BITS.map(s => mask & s.bit ? '★' : '☆').join('')}${run.masteryNew ? ` <small>Mastery: ${MASTERY_BITS.filter(s => run.masteryNew & s.bit).map(s => s.name).join(', ')}</small>` : ''}</div>` : ''}
@@ -312,7 +314,7 @@ function showResults() {
     <section class="rsStats"><h3>Statistics</h3><div class="rsCard">${rows.map(([k, v]) => `<div class="rsRow"><span>${k}</span><i></i><b>${v}</b></div>`).join('')}</div></section>
     <section class="rsGraph"><h3>Health Graph</h3><div class="rsCard"><div class="rsTimes"><span>00:00</span><span>${clock(end)}</span></div>${healthSvg(end)}</div></section>
     <section class="rsMods"><h3>Mods</h3><div class="rsCard">${mods.length ? mods.map(x => `<span>${esc(x)}</span>`).join('') : '<small>None</small>'}</div></section>
-    <footer class="rsFoot"><button data-rs="back">Back</button><div class="rsNext">${run.wait ? 'Retry, or go back to pick a map.' : `Next: ${state.queue[0] && mapById(state.queue[0].id) ? esc(mapById(state.queue[0].id).title) : r.passed ? 'playing again shortly' : 'retrying shortly'}`}</div><button data-rs="retry">Retry</button></footer></div>`;
+    <footer class="rsFoot"><button data-rs="back">Back</button><div class="rsNext">${run.wait ? 'Retry, or go back to pick a map.' : `<i></i>Next: ${state.queue[0] && mapById(state.queue[0].id) ? esc(mapById(state.queue[0].id).title) : r.passed ? 'playing again shortly' : 'retrying shortly'}`}</div><button data-rs="retry">Retry</button></footer></div>`;
   el.onclick = e => {
     const b = e.target.closest('[data-rs]');
     if (!b) return;
@@ -485,7 +487,7 @@ function renderSelectList() {
   const list = listMaps(), page = ui.browse.page, PER = 40;
   const shown = list.slice(0, (page + 1) * PER);
   $('selList').innerHTML = shown.map(m => { const t = tierOf(m), b = state.best[m.id];
-    return `<button class="selCard${m.id === ui.browse.id ? ' on' : ''}" data-map="${m.id}" style="--tier:${t.color}">${settings.thumbnails && m.img ? `<img src="${m.img}" alt="" loading="lazy">` : '<div class="noCover"></div>'}<div><div class="t">${esc(m.title)}</div><div class="s"><span>${esc(m.mapper)}</span><span>${fmtLen(m.length)}</span><span>${m.notes} notes</span><span class="status">${m.status}</span>${b && b.passes ? `<span>best ${b.rp} RP</span>` : ''}</div></div><div class="sr">${m.stars.toFixed(2)}★${b && b.passes ? `<span class="gr" style="color:${GRADE_COLORS[b.grade]}">${b.grade}</span>` : ''}</div></button>`; }).join('')
+    return `<button class="selCard${m.id === ui.browse.id ? ' on' : ''}" data-map="${m.id}" style="--tier:${t.color};--i:${Math.min(20, shown.indexOf(m))}">${settings.thumbnails && m.img ? `<img src="${m.img}" alt="" loading="lazy">` : '<div class="noCover"></div>'}<div><div class="t">${esc(m.title)}</div><div class="s"><span>${esc(m.mapper)}</span><span>${fmtLen(m.length)}</span><span>${m.notes} notes</span><span class="status">${m.status}</span>${b && b.passes ? `<span>best ${b.rp} RP</span>` : ''}</div></div><div class="sr">${m.stars.toFixed(2)}★${b && b.passes ? `<span class="gr" style="color:${GRADE_COLORS[b.grade]}">${b.grade}</span>` : ''}</div></button>`; }).join('')
     + (shown.length < list.length ? `<button class="selMore" data-more>Show more (${list.length - shown.length} left)</button>` : '') + (!list.length ? '<p class="small">No maps match.</p>' : '');
 }
 function renderSelectDetail() {
@@ -493,6 +495,8 @@ function renderSelectDetail() {
   if (!m) { $('selDetail').innerHTML = ''; return; }
   const b = state.best[m.id], hist = state.history[m.id] || [], trains = mapTrains(m), board = mapBoard(m), pc = passChance(m, state.speed, state.mods);
   const mask = state.mastery[m.id] || 0;
+  const bg = document.querySelector('.selBg');
+  bg.style.setProperty('--cover', m.img ? `url("${m.img}")` : 'none'); bg.classList.toggle('on', !!m.img);
   $('selDetail').innerHTML = `${m.img ? `<img class="selCover" src="${m.img}" alt="">` : '<div class="selCover none">no cover</div>'}
     <div class="selTitle">${esc(m.title)}</div>
     <div class="selMeta"><span>mapped by <b>${esc(m.mapper)}</b></span><span><b>${shownStars(m).toFixed(2)}★</b> ${state.speed !== 1 || modStarMult(state.mods) !== 1 ? `(${m.stars.toFixed(2)} base)` : ''}</span><span><b>${fmtLen(m.length / state.speed)}</b></span><span><b>${m.notes}</b> notes</span><span><b>${fmt(m.plays)}</b> plays</span><span class="status">${m.status}</span></div>
