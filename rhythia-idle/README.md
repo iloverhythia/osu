@@ -2,7 +2,7 @@
 
 A from-scratch recreation of the browser idle game at rhythiaidle.space. Your player plays rhythm maps on its own; you spend what it earns, pick its maps, mods and speed, and decide when a season ends.
 
-It is a static site: open `index.html` from any web server (for example `python3 -m http.server` in this folder). Progress saves to the browser's local storage.
+It is a static site, published with GitHub Pages at https://iloverhythia.github.io/osu/ by the `rhythia-idle-pages` workflow. To run it locally, serve this folder (for example `python3 -m http.server`) and open `index.html`. Progress saves to the browser's local storage.
 
 ## What is in it
 
